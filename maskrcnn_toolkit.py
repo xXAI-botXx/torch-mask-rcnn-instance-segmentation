@@ -1,5 +1,45 @@
-# Instance Segmentation Toolkit with Mask-RCNN
-# By Tobia Ippolito <3
+"""
+Instance Segmentation Toolkit with Mask-RCNN
+
+Tags:
+- training
+- inference
+
+- data augmentation
+- dual dir data loading (over ID, same name)
+- control the program by changing the variables below
+- experiment tracking
+- tensorboard
+- logging
+- visualizing
+
+- depth image integration (3 or 4 channels)
+
+- functionalities for training and inference
+
+
+
+This script defines a set of variables to configure either a Mask-RCNN model training or inference task for instance segmentation.
+Depending on the value of `SHOULD_TRAIN`, the script will either train the model on the specified dataset(s) or run inference on 
+a set of images.
+
+
+Usage:
+------
+Scroll a little bit down to the **variables** section and put the values to your need.
+
+1. To train the model:
+    Set `SHOULD_TRAIN = True` and provide paths to your data, mask, and (optionally) depth images.
+    The script will train the Mask-RCNN model according to the specified parameters.
+
+2. To run inference:
+    Set `SHOULD_TRAIN = False` and provide the path to the weights and images for testing.
+    The script will run inference and optionally visualize/save the results.
+
+
+
+By Tobia Ippolito <3
+"""
 
 ###############
 # definitions #
@@ -21,54 +61,52 @@ class DATA_LOADING_MODE(Enum):
 # Change these variables to your need
 
 # Do you want to train? Else you make an inference
-SHOULD_TRAIN = True
+SHOULD_TRAIN = True                 # Whether to run the training process or inference
 
-IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb'
-DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep'
-MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/mask-prep'
+WEIGHTS_PATH = "./weights/maskrcnn.pth"  # Path to the model weights file
+USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
 
-WEIGHTS_PATH = "./weights/maskrcnn.pth"
-USE_DEPTH = False
+IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb'        # Directory for RGB images
+DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep'  # Directory for depth-preprocessed images
+MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/mask-prep'    # Directory for mask-preprocessed images
+WIDTH = 1920                       # Image width for processing
+HEIGHT = 1080                      # Image height for processing
 
-AMOUNT = 100     # for random mode
-START_IDX = 0    # for range mode
-END_IDX = 99     # for range mode
-IMAGE_NAME = "3xM_0_10_10.jpg" # for single mode
-DATA_MODE = DATA_LOADING_MODE.ALL
+DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
+AMOUNT = 100                       # Number of images for random mode
+START_IDX = 0                      # Starting index for range mode
+END_IDX = 99                       # Ending index for range mode
+IMAGE_NAME = "3xM_0_10_10.jpg"     # Specific image name for single mode
 
-NUM_WORKERS = 4
-
+NUM_WORKERS = 4                    # Number of workers for data loading
 
 
 # Only for training #
-MULTIPLE_DATASETS = None    # pass the path to the folder if you want to create multiple models
-NAME = 'mask_rcnn'
+MULTIPLE_DATASETS = None           # Path to folder for training multiple models
+NAME = 'mask_rcnn'                 # Name of the model to use
 
-USING_EXPERIMENT_TRACKING = True
-CREATE_NEW_EXPERIMENT = True    # set this Value to False when running once
-# EXPERIMENT_ID = 12345
-EXPERIMENT_NAME = "3xM Instance Segmentation"
+USING_EXPERIMENT_TRACKING = True   # Enable experiment tracking
+CREATE_NEW_EXPERIMENT = True       # Whether to create a new experiment run
+# EXPERIMENT_ID = 12345            # Optional ID for the experiment
+EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
-NUM_EPOCHS = 20
-LEARNING_RATE = 0.005
-MOMENTUM = 0.9
-DECAY = 0.0005
-BATCH_SIZE = 2
-SHUFFLE = True
-
-
+NUM_EPOCHS = 20                    # Number of training epochs
+LEARNING_RATE = 0.005              # Learning rate for the optimizer
+MOMENTUM = 0.9                     # Momentum for the optimizer
+DECAY = 0.0005                     # Weight decay for regularization
+BATCH_SIZE = 2                     # Batch size for training
+SHUFFLE = True                     # Shuffle the data during training
 
 
 # Only for inference #
-OUTPUT_DIR = "./output"
-USE_MASK = True
-OUTPUT_TYPE = "png"    # numpy-array or png? -> png recommended
-OUTPUT_DIR = "./output"
-SHOULD_VISUALIZE = True
-VISUALIZATION_DIR = "./output/visualizations"
-SAVE_VISUALIZATION = True
-SHOW_VISUALIZATION = True
-SAVE_EVALUATION = True
+OUTPUT_DIR = "./output"            # Directory to save output files
+USE_MASK = True                    # Whether to use masks during inference
+OUTPUT_TYPE = "png"                # Output format: 'numpy-array' or 'png'
+SHOULD_VISUALIZE = True            # Whether to visualize the results
+VISUALIZATION_DIR = "./output/visualizations"  # Directory to save visualizations
+SAVE_VISUALIZATION = True          # Save the visualizations to disk
+SHOW_VISUALIZATION = True          # Display the visualizations
+SAVE_EVALUATION = True             # Save the evaluation results
 
 
 
@@ -87,6 +125,7 @@ import time
 from IPython.display import clear_output
 
 # image
+import random
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2 
@@ -99,7 +138,8 @@ from torch.utils.tensorboard import SummaryWriter
 import torchvision
 from torchvision.models.detection import MaskRCNN
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
-from torchvision.transforms import functional
+# from torchvision.transforms import functional as F
+import torchvision.transforms as T
 
 
 ###########
@@ -107,6 +147,33 @@ from torchvision.transforms import functional
 ###########
 
 def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True):
+    """
+    Load a Mask R-CNN model with a specified backbone and optional modifications.
+
+    This function initializes a Mask R-CNN model with a ResNet50-FPN backbone. 
+    It allows for the configuration of input channels and loading of pretrained weights.
+
+    Parameters:
+    -----------
+        weights_path (str, optional): 
+            Path to the weights file to load the model's state dict. 
+            If None, the model will be initialized with random weights or 
+            pretrained weights if 'pretrained' is True.
+        
+        use_4_channels (bool, optional): 
+            If True, modifies the first convolutional layer to accept 
+            4 input channels instead of the default 3. The weights from 
+            the existing channels are copied accordingly.
+        
+        pretrained (bool, optional): 
+            If True, loads the pretrained weights for the backbone. 
+            Defaults to True.
+
+    Returns:
+    --------
+        model (MaskRCNN): 
+            The initialized Mask R-CNN model instance, ready for training or inference.
+    """
     backbone = resnet_fpn_backbone('resnet50', pretrained=pretrained)
     model = MaskRCNN(backbone, num_classes=2)  # 2 Classes (Background + 1 Object)
 
@@ -137,7 +204,81 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True):
 
 
 
+# def resize_with_padding(image, target_h, target_w, method=cv2.INTER_LINEAR)    # cv2.INTER_NEAREST
+#     h, w = image.shape[:2]
+    
+#     # if the size is already right, then return original image
+#     if h == target_h and w == target_w:
+#         return image
+
+#     # Calculate padding
+#     pad_h = max(target_h - h, 0)
+#     pad_w = max(target_w - w, 0)
+    
+#     # Add padding to the image
+#     padded_image = cv2.copyMakeBorder(
+#         image, 
+#         0, pad_h, 
+#         0, pad_w, 
+#         cv2.BORDER_CONSTANT, 
+#         value=[0, 0, 0]  # You can change the padding color here if necessary
+#     )
+    
+#     # Resize the padded image to the target size
+#     resized_image = cv2.resize(padded_image, (target_w, target_h), interpolation=method)
+    
+#     return resized_image
+
+
+
 class Dual_Dir_Dataset(Dataset):
+    """
+    A dataset class for loading and processing images, depth maps, and masks 
+    from specified directories. This dataset supports various modes of data loading 
+    including random selection, range-based selection, and single image loading.
+
+
+    Parameters:
+    -----------
+    img_dir (str): Directory containing RGB images.
+    depth_dir (str, optional): Directory containing depth images. Default is None.
+    mask_dir (str, optional): Directory containing mask images. Default is None.
+    transform (callable, optional): Optional transform to be applied to the images. Default is None.
+    amount (int): Number of random images to select when using random mode. Default is 100.
+    start_idx (int): Starting index for range mode. Default is 0.
+    end_idx (int): Ending index for range mode. Default is 99.
+    image_name (str): The name of a single image for single mode. Default is "3xM_0_10_10.jpg".
+    data_mode (str): Mode for loading images (e.g., 'ALL', 'RANDOM', 'RANGE', 'SINGLE'). Default is DATA_LOADING_MODE.ALL.
+    use_mask (bool): Flag indicating whether to load mask images. Default is True.
+    use_depth (bool): Flag indicating whether to load depth images. Default is False.
+    log_path (str, optional): Path for logging data verification results. Default is None.
+    width (int): Width to which images should be resized (if resizing is implemented). Default is 1920.
+    height (int): Height to which images should be resized (if resizing is implemented). Default is 1080.
+
+
+    Attributes:
+    -----------
+    img_names (list): List of image names based on the loading mode and parameters.
+    
+
+    Methods:
+    --------
+    __len__(): Returns the total number of images in the dataset.
+    __getitem__(idx): Loads and returns the image, depth map, and mask at the specified index.
+    get_bounding_boxes(masks): Computes and returns bounding boxes from the mask images.
+    verify_data(): Verifies the existence and validity of images, masks, and depth maps.
+    load_datanames(path_to_images, amount, start_idx, end_idx, image_name, data_mode): 
+        Loads file paths from a specified directory based on the given mode.
+    verify_mask_post_processing(original_mask, new_mask): 
+        Validates that the transformation from RGB to grey mask preserves the correct number of objects.
+    rgb_mask_to_grey_mask(rgb_img, verify): 
+        Converts an RGB mask to a grey mask, mapping unique RGB values to increasing integers.
+
+    Raises:
+    -------
+    ValueError: If an invalid data_mode is provided or if the verification of mask processing fails.
+    """
+
     def __init__(self, 
                 img_dir, 
                 depth_dir=None,
@@ -150,7 +291,9 @@ class Dual_Dir_Dataset(Dataset):
                 data_mode=DATA_LOADING_MODE.ALL,
                 use_mask=True,
                 use_depth=False,
-                log_path=None
+                log_path=None,
+                width=1920,
+                height=1080
                 ):
 
         self.img_dir = img_dir
@@ -160,6 +303,8 @@ class Dual_Dir_Dataset(Dataset):
         self.use_mask = use_mask
         self.use_depth = use_depth
         self.log_path = log_path
+        self.width = width
+        self.height = height
         self.img_names = self.load_datanames(image_path=img_dir, 
                                                 amount=amount, 
                                                 start_idx=start_idx, 
@@ -182,18 +327,21 @@ class Dual_Dir_Dataset(Dataset):
         depth_path = os.path.join(self.depth_dir, img_name)
         mask_path = os.path.join(self.mask_dir, img_name)
 
-        # Load the RGB Image, Depth Image and the Gray Mask
+        # Load the RGB Image, Depth Image and the Gray Mask (and make sure that the size is right)
         image = cv2.imread(img_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # image = resize_with_padding(image, target_h=self.height, target_w=self.width, method=cv2.INTER_LINEAR)
         
         if self.use_depth:
             depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
             _, depth, _, _ =  cv2.split(depth)
+            # depth = resize_with_padding(depth, target_h=self.height, target_w=self.width, method=cv2.INTER_LINEAR)
 
         if self.use_mask:
             mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)    # cv2.IMREAD_GRAYSCALE)
             if len(mask.shape) > 2:
                 mask = self.rgb_mask_to_grey_mask(rgb_img=mask, verify=False)
+            # mask = resize_with_padding(mask, target_h=self.height, target_w=self.width, method=cv2.INTER_NEAREST)
         
             # # check mask
             # if len(np.unique(mask)) <= 1: 
@@ -220,7 +368,7 @@ class Dual_Dir_Dataset(Dataset):
             image = np.concatenate((image, depth), axis=-1)
         
         # image to tensor
-        image = torchvision.transforms.ToTensor()(image)
+        image = T.ToTensor()(image)
 
         if self.use_mask:
             # Create List of Binary Masks
@@ -395,34 +543,6 @@ class Dual_Dir_Dataset(Dataset):
                 image_name, # for single mode
                 data_mode=DATA_LOADING_MODE.ALL
             ):
-        """
-        Loads file paths from a specified directory based on the given mode.
-
-        Parameters:
-        path_to_images (str): The path to the directory containing images.
-        amount (int): Number of random images to select (used in 'random' mode).
-        start_idx (int): The starting index of the range of images to select (used in 'range' mode).
-        end_idx (int): The ending index of the range of images to select (used in 'range' mode).
-        image_name (str): The name of a single image to select (used in 'single' mode).
-        data_mode (str, optional): The mode for selecting images. It can be one of the following:
-            - 'all': Selects all images.
-            - 'random': Selects a random set of images up to the specified amount.
-            - 'range': Selects a range of images from start_idx to end_idx.
-            - 'single': Selects a single image specified by image_name.
-            Default is 'all'.
-
-        Returns:
-        list: A list of file-names of the selected images.
-
-        Raises:
-        ValueError: If an invalid data_mode is provided.
-
-        Example:
-        >>> load_data_paths('/path/to/images', amount=10, start_idx=0, end_idx=10, image_name='image1.jpg', data_mode='random')
-        ['image2.jpg', 'image5.jpg', 'image8.jpg', ...]
-
-        Notice: Detects all forms of files and directories and doesn't filter on them.
-        """
         all_images = os.listdir(path_to_images)
 
         images = []
@@ -475,11 +595,6 @@ class Dual_Dir_Dataset(Dataset):
 
 
     def rgb_mask_to_grey_mask(self, rgb_img, verify):
-        """
-        Tries to transform a RGB Mask to a Grey Mask. Every unique RGB Value should be a new increasing number = 1, 2, 3, 4, 5, 6
-
-        And 0, 0, 0 should be 0
-        """
         height, width, channels = rgb_img.shape
 
         # init new mask with only 0 -> everything is background
@@ -517,7 +632,43 @@ class Dual_Dir_Dataset(Dataset):
 
 def collate_fn(batch):
     """
-    Make sure that every datapoint in the current batch have the same amount of masks.
+    Custom collate function for batching images and targets in a DataLoader.
+
+    This function ensures that each data point in the current batch has the same 
+    number of masks by padding the masks with zeros if necessary. It extracts 
+    images, targets, and names from the input batch and aligns them to prepare 
+    for processing in a neural network.
+
+    Parameters:
+    -----------
+    batch (list): A list of tuples, where each tuple contains:
+        - images (torch.Tensor): The image tensor of shape (C, H, W).
+        - targets (dict): A dictionary containing target information for 
+          instance segmentation, including:
+            - masks (torch.Tensor): A tensor of shape (N, H, W) containing 
+              binary masks for each object, where N is the number of objects.
+            - boxes (torch.Tensor)
+            - classes (torch.Tensor)
+        - names (str): The name of the image file.
+
+    Returns:
+    --------
+    tuple: A tuple containing:
+        - images (torch.Tensor): A stacked tensor of shape (B, C, H, W), 
+          where B is the batch size.
+        - targets (list): A list of dictionaries containing the padded 
+          masks, bounding boxes, classes for each image in the batch.
+        - names (tuple): A tuple of image names.
+
+    Example:
+    --------
+    >>> batch = [(image1, target1, name1), (image2, target2, name2)]
+    >>> images, targets, names = collate_fn(batch)
+
+    Note:
+    -----
+    This function assumes that the input batch is non-empty and that each 
+    target contains a "masks" key with the corresponding tensor.
     """
     images, targets, names = zip(*batch)
     
@@ -532,6 +683,188 @@ def collate_fn(batch):
 
 
 
+# Custom Transformations
+class Random_Flip:
+    def __call__(self, rgb_img, depth_img, mask_img):
+        # rgb_img, depth_img, mask_img = images
+        if random.random() > 0.6:
+            # Horizontal Flipping
+            rgb_img = T.functional.hflip(rgb_img)
+            if depth_img is not None:
+                depth_img = T.functional.hflip(depth_img)
+            if mask_img is not None:
+                mask_img = T.functional.hflip(mask_img)
+        if random.random() > 0.6:
+            # Vertical Flipping
+            rgb_img = T.functional.vflip(rgb_img)
+            if depth_img is not None:
+                depth_img = T.functional.vflip(depth_img)
+            if mask_img is not None:
+                mask_img = T.functional.vflip(mask_img)
+        return rgb_img, depth_img, mask_img
+
+
+
+class Random_Rotation:
+    def __init__(self, max_angle=30):
+        self.max_angle = max_angle
+    
+    def __call__(self, rgb_img, depth_img, mask_img):
+        # rgb_img, depth_img, mask_img = images
+        if random.random() > 0.6:
+            angle = random.uniform(-self.max_angle, self.max_angle)
+            rgb_img = T.functional.rotate(rgb_img, angle)
+            if depth_img is not None:
+                depth_img = T.functional.rotate(depth_img, angle, interpolation=T.InterpolationMode.NEAREST)
+            if mask_img is not None:
+                mask_img = T.functional.rotate(mask_img, angle, interpolation=T.InterpolationMode.NEAREST)
+        return rgb_img, depth_img, mask_img
+
+
+
+class RandomCrop:
+    def __init__(self, min_crop_size, max_crop_size):
+        # min_crop_size und max_crop_size sind Tupel (min_h, min_w), (max_h, max_w)
+        self.min_crop_size = min_crop_size
+        self.max_crop_size = max_crop_size
+    
+    def __call__(self, rgb_img, depth_img, mask_img):
+        if random.random() > 0.7:
+            # random crop-size
+            random_h = random.randint(self.min_crop_size[0], self.max_crop_size[0])
+            random_w = random.randint(self.min_crop_size[1], self.max_crop_size[1])
+            random_crop_size = (random_h, random_w)
+
+            # get random parameters for cropping
+            i, j, h, w = T.RandomCrop.get_params(rgb_img, output_size=random_crop_size)
+            
+            # crop for all images
+            rgb_img = T.functional.crop(rgb_img, i, j, h, w)
+            if depth_img is not None:
+                depth_img = T.functional.crop(depth_img, i, j, h, w)
+            if mask_img is not None:
+                mask_img = T.functional.crop(mask_img, i, j, h, w)
+            
+        return rgb_img, depth_img, mask_img
+
+
+
+class Random_Brightness_Contrast:
+    def __init__(self, brightness_range=0.2, contrast_range=0.2):
+        self.brightness = brightness_range
+        self.contrast = contrast_range
+
+    def __call__(self, rgb_img, depth_img, mask_img):
+        # rgb_img, depth_img, mask_img = images
+        if random.random() > 0.6:
+            brightness_factor = random.uniform(1 - self.brightness, 1 + self.brightness)
+            contrast_factor = random.uniform(1 - self.contrast, 1 + self.contrast)
+            rgb_img = T.functional.adjust_brightness(rgb_img, brightness_factor)
+            rgb_img = T.functional.adjust_contrast(rgb_img, contrast_factor)
+        return rgb_img, depth_img, mask_img
+
+
+
+class Add_Gaussian_Noise:
+    def __init__(self, mean=0, std=0.01):
+        self.mean = mean
+        self.std = std
+    
+    def __call__(self, rgb_img, depth_img, mask_img):
+        # rgb_img, depth_img, mask_img = images
+        if random.random() > 0.6:
+            noise_rgb = torch.randn(rgb_img.size()) * self.std + self.mean
+            rgb_img = torch.clamp(rgb_img + noise_rgb, 0, 1)
+
+        if random.random() > 0.6:
+            if depth_img is not None:
+                noise = torch.randn(depth_img.size()) * self.std + self.mean
+                depth_img = torch.clamp(depth_img + noise, 0, 1)
+        return rgb_img, depth_img, mask_img
+
+
+
+class Random_Gaussian_Blur:
+    def __init__(self, kernel_size=5, sigma=(0.1, 2.0)):
+        self.kernel_size = kernel_size
+        self.sigma = sigma
+
+    def __call__(self, rgb_img, depth_img, mask_img):
+        if random.random() > 0.95:
+            sigma = random.uniform(*self.sigma)
+            rgb_img = T.GaussianBlur(kernel_size=self.kernel_size, sigma=sigma)(rgb_img)
+            if depth_img is not None:
+                depth_img = T.GaussianBlur(kernel_size=self.kernel_size, sigma=sigma)(depth_img)
+        return rgb_img, depth_img, mask_img
+
+
+
+class Random_Scale:
+    def __init__(self, scale_range=(0.8, 1.2)):
+        self.scale_range = scale_range
+    
+    def __call__(self, rgb_img, depth_img, mask_img):
+        # rgb_img, depth_img, mask_img = images
+        if random.random() > 0.6:
+            scale_factor = random.uniform(self.scale_range[0], self.scale_range[1])
+            h, w = rgb_img.size[-2:]
+            new_size = (int(h * scale_factor), int(w * scale_factor))
+            rgb_img = T.functional.resize(rgb_img, new_size)
+            if depth_img is not None:
+                depth_img = T.functional.resize(depth_img, new_size, interpolation=T.InterpolationMode.NEAREST)
+            if mask_img is not None:
+                mask_img = T.functional.resize(mask_img, new_size, interpolation=T.InterpolationMode.NEAREST)
+        return rgb_img, depth_img, mask_img
+
+
+
+class Resize:
+    def __init__(self, width=1920, height=1080):
+        self.target_size = (height, width)
+
+    def __call__(self, rgb_img, depth_img, mask_img):
+        height, width = rgb_img.shape[:2]
+        if (height, width) != self.target_size:
+            resize_transform = T.Resize(self.target_size)
+            rgb_img = resize_transform(rgb_img)
+            if depth_img is not None:
+                depth_img = resize_transform(depth_img)
+            if mask_img is not None:
+                mask_img = resize_transform(mask_img)
+        
+        return rgb_img, depth_img, mask_img
+
+
+
+class Train_Augmentations:
+    def __init__(self, width, height):
+        self.augmentations = T.Compose([
+            Random_Flip(),
+            Random_Rotation(max_angle=30),
+            RandomCrop(min_crop_size=(100, 100), max_crop_size=(200, 200)),
+            Random_Brightness_Contrast(brightness_range=0.2, contrast_range=0.2),
+            Add_Gaussian_Noise(mean=0, std=0.01),
+            Random_Gaussian_Blur(kernel_size=5, sigma=(0.1, 2.0)),
+            Random_Scale(scale_range=(0.8, 1.2)),
+            Resize(width=width, height=height),
+        ])
+
+    def __call__(self, rgb_img, depth_img, mask_img):
+        return self.augmentations(rgb_img, depth_img, mask_img)
+
+
+
+class Inference_Augmentations:
+    def __init__(self, width, height):
+        self.augmentations = T.Compose([
+            Resize(width=width, height=height),
+        ])
+
+    def __call__(self, rgb_img, depth_img, mask_img):
+        return self.augmentations(rgb_img, depth_img, mask_img)
+
+
+
 
 
 
@@ -540,6 +873,37 @@ def collate_fn(batch):
 ############
 
 def log(file_path, content, reset_logs=False, should_print=True):
+    """
+    Logs content to a specified file and optionally prints it to the console.
+
+    This function handles logging by writing content to a file at the specified 
+    file path. If the file does not exist or if the `reset_logs` flag is set to 
+    True, it will create a new log file or clear the existing one. The function 
+    also offers an option to print the content to the console.
+
+    Parameters:
+    -----------
+    file_path (str or None): The path to the log file. If None, the function 
+                              does nothing.
+    content (str): The content to be logged. This will be appended to the file.
+    reset_logs (bool): If True, the log file will be cleared before writing 
+                       the new content. Default is False.
+    should_print (bool): If True, the content will also be printed to the console. 
+                         Default is True.
+
+    Returns:
+    --------
+    None
+
+    Example:
+    --------
+    >>> log("logs/my_log.txt", "This is a log entry.")
+    
+    Note:
+    -----
+    Ensure that the directory for the log file exists; this function does not 
+    create intermediate directories.
+    """
     if file_path is None:
         return
 
@@ -564,6 +928,31 @@ def update_output(cur_epoch,
                     losses,
                     batch_size,
                     log_path):
+    """
+    Updates and logs the training output for the YOLACT model.
+
+    This function formats and prints the current training status, including
+    epoch and iteration details, duration, estimated time of arrival (ETA),
+    total loss, and specific loss metrics. It also logs the output to a
+    specified log file.
+
+    Parameters:
+    -----------
+    cur_epoch (int): Current epoch number.
+    cur_iteration (int): Current iteration number.
+    max_iterations (int): Total number of iterations for the training.
+    data_size (int): Total size of the training dataset.
+    duration (float): Duration of the current iteration in seconds.
+    eta_str (str): Estimated time of arrival as a string.
+    total_loss (float): Total loss for the current iteration.
+    losses (dict): Dictionary of specific losses to be displayed.
+    batch_size (int): Size of the batch used in training.
+    log_path (str): Path to the log file where output should be written.
+
+    Returns:
+    --------
+    None
+    """
     now = datetime.now()
     output = f"Yolact Training - {now.hour:02}:{now.minute:02} {now.day:02}.{now.month:02}.{now.year:04}"
 
@@ -604,6 +993,29 @@ def pad_masks(masks, max_num_objs):
 def train_loop(log_path, learning_rate, momentum, decay, num_epochs, 
                 batch_size, dataset, data_loader, name, experiment_tracking,
                 use_depth, weights_path):
+    """
+    Train the Mask R-CNN model with the specified parameters.
+
+    Parameters:
+    -----------
+    log_path (str): Path to the log file.
+    learning_rate (float): Learning rate for the optimizer.
+    momentum (float): Momentum for the optimizer.
+    decay (float): Weight decay for the optimizer.
+    num_epochs (int): Number of epochs for training.
+    batch_size (int): Size of the batch.
+    dataset: The dataset used for training.
+    data_loader: Data loader for the training data.
+    name (str): Name of the model for saving.
+    experiment_tracking (bool): Whether to track experiments.
+    use_depth (bool): Whether to use depth information.
+    weights_path (str): Path to the pre-trained weights.
+
+    Returns:
+    --------
+    None
+    """
+
     # Create Mask-RCNN with Feature Pyramid Network (FPN) as backbone
     log(log_path, "Create the model and preparing for training...")
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -762,8 +1174,74 @@ def train(
         using_experiment_tracking=False,
         create_new_experiment=True,    
         # experiment_id=12345,
-        experiment_name='3xM Instance Segmentation'
+        experiment_name='3xM Instance Segmentation',
+        width=1920,
+        height=1080
     ):
+    """
+    Trains a Mask R-CNN model for instance segmentation using PyTorch.
+
+    Parameters:
+    -----------
+    name : str, optional
+        The name of the model. Default is 'mask_rcnn'.
+    weights_path : str or None, optional
+        Path to the pre-trained weights. If None, the model will be trained from scratch. Default is None.
+    num_epochs : int, optional
+        Number of epochs for training. Default is 20.
+    learning_rate : float, optional
+        The learning rate for the optimizer. Default is 0.005.
+    momentum : float, optional
+        Momentum factor for the optimizer. Default is 0.9.
+    decay : float, optional
+        Weight decay (L2 regularization) factor. Default is 0.0005.
+    batch_size : int, optional
+        Batch size for data loading. Default is 2.
+    img_dir : str, optional
+        Directory path to the RGB images. Default is '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb'.
+    depth_dir : str, optional
+        Directory path to the depth images. Default is '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep'.
+    mask_dir : str, optional
+        Directory path to the mask images. Default is '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/mask-prep'.
+    num_workers : int, optional
+        Number of worker threads for data loading. Default is 4.
+    shuffle : bool, optional
+        Whether to shuffle the dataset during training. Default is True.
+    amount : int, optional
+        Number of images to use in random mode. Default is 100.
+    start_idx : int, optional
+        Starting index for range mode. Default is 0.
+    end_idx : int, optional
+        Ending index for range mode. Default is 99.
+    image_name : str, optional
+        Name of the image to load for single mode. Default is '3xM_0_10_10.jpg'.
+    data_mode : DATA_LOADING_MODE, optional
+        The mode in which to load data. Default is DATA_LOADING_MODE.ALL.
+    use_depth : bool, optional
+        Whether to include depth data in the training. Default is False.
+    using_experiment_tracking : bool, optional
+        Whether to use MLflow for experiment tracking. Default is False.
+    create_new_experiment : bool, optional
+        If True, creates a new experiment in MLflow. Default is True.
+    experiment_name : str, optional
+        Name of the MLflow experiment. Default is '3xM Instance Segmentation'.
+    width : int, optional
+        Width of the input images for augmentation. Default is 1920.
+    height : int, optional
+        Height of the input images for augmentation. Default is 1080.
+
+    Returns:
+    --------
+    None
+        The function trains the Mask R-CNN model and logs results to the console and optionally to MLflow if enabled.
+    
+    Notes:
+    ------
+    - The function supports different modes of data loading: random, range, or single image mode.
+    - If using MLflow for experiment tracking, ensure MLflow is properly set up.
+    - The function logs training information and parameters to a log file at the specified log_path.
+
+    """
 
     log_path = f"./logs/{name}.txt"
     log(log_path, "", reset_logs=True, print=False)
@@ -772,9 +1250,10 @@ def train(
 
     # Dataset and DataLoader
     log(log_path, "Loading the data...")
-    dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=None, 
+    dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=Train_Augmentations(width=width, height=height), 
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
-                                data_mode=data_mode, use_mask=True, use_depth=use_depth, log_path=log_path)
+                                data_mode=data_mode, use_mask=True, use_depth=use_depth, log_path=log_path,
+                                width=width, height=height)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, collate_fn=collate_fn)
 
     # Experiment Tracking
@@ -1031,13 +1510,16 @@ def calc_pixel_accuracy(mask_1, mask_2):
     Calculate the pixel accuracy between two masks.
 
     Args:
+    -----
         mask_1 (np.ndarray): The first mask.
         mask_2 (np.ndarray): The second mask.
 
     Returns:
+    --------
         float: The pixel accuracy between the two masks.
 
     Raises:
+    -------
         ValueError: If the shapes of the masks are different.
     """
     if mask_1.shape != mask_2.shape:
@@ -1054,13 +1536,16 @@ def calc_intersection_over_union(mask_1, mask_2):
     Calculate the Intersection over Union (IoU) between two masks.
 
     Args:
+    -----
         mask_1 (np.ndarray): The first mask.
         mask_2 (np.ndarray): The second mask.
 
     Returns:
+    --------
         float: The IoU between the two masks.
 
     Raises:
+    -------
         ValueError: If the shapes of the masks are different.
     """
     if mask_1.shape != mask_2.shape:
@@ -1081,15 +1566,18 @@ def calc_precision_and_recall(mask_1, mask_2, only_bg_and_fg=False, aggregation=
     Calculate the precision and recall between two masks.
 
     Args:
+    -----
         mask_1 (np.ndarray): The first mask.
         mask_2 (np.ndarray): The second mask.
         only_bg_and_fg (bool): Whether to calculate only for background and foreground. Defaults to False.
         aggregation (str): Method to aggregate precision and recall values. Options are "sum", "mean", "median", "std", "var". Defaults to "mean".
 
     Returns:
+    --------
         tuple: Precision and recall values.
 
     Raises:
+    -------
         ValueError: If the shapes of the masks are different.
     """
     if mask_1.shape != mask_2.shape:
@@ -1140,10 +1628,12 @@ def calc_dice_coefficient(mask_1, mask_2):
     Calculate the Dice Similarity Coefficient between two masks.
 
     Args:
+    -----
         mask_1 (np.ndarray): The first mask.
         mask_2 (np.ndarray): The second mask.
 
     Returns:
+    --------
         float: The Dice coefficient between the two masks.
     """
     intersection = np.logical_and(mask_1, mask_2)
@@ -1157,10 +1647,12 @@ def calc_f1_score(precision, recall):
     Calculate the F1 Score based on precision and recall.
 
     Args:
+    -----
         precision (float): The precision value.
         recall (float): The recall value.
 
     Returns:
+    --------
         float: The F1 score.
     """
     if precision + recall == 0:
@@ -1173,10 +1665,12 @@ def calc_false_positive_rate(mask_1, mask_2):
     Calculate the False Positive Rate (FPR) between two masks.
 
     Args:
+    -----
         mask_1 (np.ndarray): The first mask.
         mask_2 (np.ndarray): The second mask.
 
     Returns:
+    --------
         float: The False Positive Rate.
     """
     FP = np.sum((mask_1 > 0) & (mask_2 == 0))
@@ -1190,10 +1684,12 @@ def calc_false_negative_rate(mask_1, mask_2):
     Calculate the False Negative Rate (FNR) between two masks.
 
     Args:
+    -----
         mask_1 (np.ndarray): The first mask.
         mask_2 (np.ndarray): The second mask.
 
     Returns:
+    --------
         float: The False Negative Rate.
     """
     FN = np.sum((mask_1 == 0) & (mask_2 > 0))
@@ -1207,11 +1703,13 @@ def eval_pred(pred, ground_truth, name="instance_segmentation", should_print=Tru
     Evaluate prediction against ground truth by calculating pixel accuracy, IoU, precision, recall, F1-score, Dice coefficient, FPR, and FNR.
 
     Args:
+    -----
         pred (np.ndarray): The predicted mask.
         ground_truth (np.ndarray): The ground truth mask.
         should_print (bool): Whether to print the evaluation results. Defaults to True.
 
     Returns:
+    --------
         tuple: Evaluation metrics including pixel accuracy, IoU, precision, recall, F1 score, Dice coefficient, FPR, and FNR.
     """
     pixel_acc = calc_pixel_accuracy(pred, ground_truth)
@@ -1262,15 +1760,59 @@ def inference(  weights_path,
                 visualization_dir="./output/visualizations",
                 save_visualization=True,
                 save_evaluation=True,
-                show_visualization=True):
+                show_visualization=True,
+                width=1920,
+                height=1080
+            ):
+    """
+    Perform inference using a Mask R-CNN model with the provided dataset and parameters, while also
+    supporting visualization and evaluation of the results.
+
+    Args:
+    -----
+        weights_path (str): Path to the pretrained Mask R-CNN model weights.
+        img_dir (str): Directory containing RGB images for inference.
+        depth_dir (str): Directory containing depth-prepared images (if applicable).
+        mask_dir (str): Directory containing ground-truth mask-prepared images (if applicable).
+        amount (int): Number of images to process in random mode.
+        start_idx (int): Starting index for range mode.
+        end_idx (int): Ending index for range mode.
+        image_name (str): Image name for single image inference mode.
+        data_mode (Enum): Data loading mode, choosing between all, range, random, or single image modes.
+        num_workers (int): Number of workers for data loading.
+        use_mask (bool): Whether to use ground-truth masks during inference for evaluation and comparison.
+        use_depth (bool): Whether to include depth information for the model inference.
+        output_type (str): Format to save the inferred masks, options are ['jpg', 'png', 'npy'].
+        output_dir (str): Directory to save the inference results.
+        should_visualize (bool): Whether to visualize the inference process.
+        visualization_dir (str): Directory to save visualized results.
+        save_visualization (bool): Whether to save the visualizations.
+        save_evaluation (bool): Whether to save evaluation results.
+        show_visualization (bool): Whether to display the visualized results.
+        width (int): Image width for resizing during inference.
+        height (int): Image height for resizing during inference.
+
+    Returns:
+    --------
+        None: This function outputs inference masks, saves results, and optionally visualizes or evaluates them.
+    
+    Notes:
+    ------
+        - The function loads the Mask R-CNN model with the provided weights and runs inference over the dataset.
+        - The masks can be saved in several formats, including 'jpg', 'png', or 'npy'.
+        - Ground truth comparisons and visualizations can be enabled to further analyze the results.
+        - Evaluation is done when ground-truth masks are provided, comparing prediction accuracy.
+    """
+
     print(f"xX Mask-RCNN Inference Xx")
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     print(f"Using {device}")
 
-    dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=None, 
+    dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=Inference_Augmentations(width=width, height=height), 
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
-                                data_mode=data_mode, use_mask=use_mask, use_depth=use_depth, log_path=None)
+                                data_mode=data_mode, use_mask=use_mask, use_depth=use_depth, log_path=None,
+                                width=width, height=height)
     data_loader = DataLoader(dataset, batch_size=1, num_workers=num_workers, collate_fn=collate_fn)
 
     model_name = ".".join(weights_path.split("/")[-1].split(".")[:-1])
@@ -1425,7 +1967,9 @@ if __name__ == "__main__":
                 using_experiment_tracking=USING_EXPERIMENT_TRACKING,
                 create_new_experiment=CREATE_NEW_EXPERIMENT,    
                 # experiment_id=EXPERIMENT_ID,
-                experiment_name=EXPERIMENT_NAME
+                experiment_name=EXPERIMENT_NAME,
+                width=WIDTH,
+                height=HEIGHT
             )
     else:
         inference(
@@ -1447,7 +1991,9 @@ if __name__ == "__main__":
                 visualization_dir=VISUALIZATION_DIR,
                 save_visualization=SAVE_VISUALIZATION,
                 save_evaluation=SAVE_EVALUATION,
-                show_visualization=SHOW_VISUALIZATION
+                show_visualization=SHOW_VISUALIZATION,
+                width=WIDTH,
+                height=HEIGHT
         )
     
     
