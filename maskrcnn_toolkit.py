@@ -27,14 +27,19 @@ a set of images.
 Usage:
 ------
 Scroll a little bit down to the **variables** section and put the values to your need.
+The first 2 Variables decides your mode and 
 
 1. To train the model:
-    Set `SHOULD_TRAIN = True` and provide paths to your data, mask, and (optionally) depth images.
+    Set `MODE = RUN_MODE.TRAIN` and provide paths to your data, mask, and (optionally) depth images.
     The script will train the Mask-RCNN model according to the specified parameters.
 
 2. To run inference:
-    Set `SHOULD_TRAIN = False` and provide the path to the weights and images for testing.
+    Set `MODE = RUN_MODE.INFERENCE` and provide the path to the weights and images for testing.
     The script will run inference and optionally visualize/save the results.
+
+    You can choose between a simple inference and a more advanced inference. 
+    The simple inference just inference one given image and save + returns the mask.
+    The other inference can inference multiple images (also one) and can visualize the results and evaluate them.
 
 
 
@@ -52,6 +57,13 @@ class DATA_LOADING_MODE(Enum):
 
 
 
+class RUN_MODE(Enum):
+    TRAIN = "train"
+    INFERENCE = "inference"
+    SIMPLE_INFERENCE = "simple_inference"
+
+
+
 
 
 
@@ -60,53 +72,98 @@ class DATA_LOADING_MODE(Enum):
 #############
 # Change these variables to your need
 
-# Do you want to train? Else you make an inference
-SHOULD_TRAIN = True                 # Whether to run the training process or inference
-
-WEIGHTS_PATH = "./weights/maskrcnn.pth"  # Path to the model weights file
-USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
-
-IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb'        # Directory for RGB images
-DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep'  # Directory for depth-preprocessed images
-MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/mask-prep'    # Directory for mask-preprocessed images
-WIDTH = 1920                       # Image width for processing
-HEIGHT = 1080                      # Image height for processing
-
-DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
-AMOUNT = 100                       # Number of images for random mode
-START_IDX = 0                      # Starting index for range mode
-END_IDX = 99                       # Ending index for range mode
-IMAGE_NAME = "3xM_0_10_10.jpg"     # Specific image name for single mode
-
-NUM_WORKERS = 4                    # Number of workers for data loading
+MODE = RUN_MODE.TRAIN
 
 
-# Only for training #
-MULTIPLE_DATASETS = None           # Path to folder for training multiple models
-NAME = 'mask_rcnn'                 # Name of the model to use
 
-USING_EXPERIMENT_TRACKING = True   # Enable experiment tracking
-CREATE_NEW_EXPERIMENT = True       # Whether to create a new experiment run
-# EXPERIMENT_ID = 12345            # Optional ID for the experiment
-EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
+# -------- #
+# TRAINING #
+# -------- #
+if MODE == RUN_MODE.TRAIN:
+    WEIGHTS_PATH = "./weights/maskrcnn.pth"  # Path to the model weights file
+    USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
 
-NUM_EPOCHS = 20                    # Number of training epochs
-LEARNING_RATE = 0.005              # Learning rate for the optimizer
-MOMENTUM = 0.9                     # Momentum for the optimizer
-DECAY = 0.0005                     # Weight decay for regularization
-BATCH_SIZE = 2                     # Batch size for training
-SHUFFLE = True                     # Shuffle the data during training
+    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb'        # Directory for RGB images
+    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep'  # Directory for depth-preprocessed images
+    MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/mask-prep'    # Directory for mask-preprocessed images
+    WIDTH = 1920                       # Image width for processing
+    HEIGHT = 1080                      # Image height for processing
+
+    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
+    AMOUNT = 100                       # Number of images for random mode
+    START_IDX = 0                      # Starting index for range mode
+    END_IDX = 99                       # Ending index for range mode
+    IMAGE_NAME = "3xM_0_10_10.png"     # Specific image name for single mode
+
+    NUM_WORKERS = 4                    # Number of workers for data loading
+
+    MULTIPLE_DATASETS = None           # Path to folder for training multiple models
+    NAME = 'mask_rcnn'                 # Name of the model to use
+
+    USING_EXPERIMENT_TRACKING = True   # Enable experiment tracking
+    CREATE_NEW_EXPERIMENT = True       # Whether to create a new experiment run
+    # EXPERIMENT_ID = 12345            # Optional ID for the experiment
+    EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
+
+    NUM_EPOCHS = 20                    # Number of training epochs
+    LEARNING_RATE = 0.005              # Learning rate for the optimizer
+    MOMENTUM = 0.9                     # Momentum for the optimizer
+    DECAY = 0.0005                     # Weight decay for regularization
+    BATCH_SIZE = 2                     # Batch size for training
+    SHUFFLE = True                     # Shuffle the data during training
 
 
-# Only for inference #
-OUTPUT_DIR = "./output"            # Directory to save output files
-USE_MASK = True                    # Whether to use masks during inference
-OUTPUT_TYPE = "png"                # Output format: 'numpy-array' or 'png'
-SHOULD_VISUALIZE = True            # Whether to visualize the results
-VISUALIZATION_DIR = "./output/visualizations"  # Directory to save visualizations
-SAVE_VISUALIZATION = True          # Save the visualizations to disk
-SHOW_VISUALIZATION = True          # Display the visualizations
-SAVE_EVALUATION = True             # Save the evaluation results
+
+# --------- #
+# INFERENCE #
+# --------- #
+if MODE == RUN_MODE.INFERENCE:
+    WEIGHTS_PATH = "./weights/maskrcnn.pth"  # Path to the model weights file
+    USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
+
+    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb'        # Directory for RGB images
+    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep'  # Directory for depth-preprocessed images
+    MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/mask-prep'    # Directory for mask-preprocessed images
+    WIDTH = 1920                       # Image width for processing
+    HEIGHT = 1080                      # Image height for processing
+
+    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
+    AMOUNT = 100                       # Number of images for random mode
+    START_IDX = 0                      # Starting index for range mode
+    END_IDX = 99                       # Ending index for range mode
+    IMAGE_NAME = "3xM_0_10_10.jpg"     # Specific image name for single mode
+
+    NUM_WORKERS = 4                    # Number of workers for data loading
+
+    OUTPUT_DIR = "./output"            # Directory to save output files
+    USE_MASK = True                    # Whether to use masks during inference
+    OUTPUT_TYPE = "png"                # Output format: 'numpy-array' or 'png'
+    SHOULD_VISUALIZE = True            # Whether to visualize the results
+    VISUALIZATION_DIR = "./output/visualizations"  # Directory to save visualizations
+    SAVE_VISUALIZATION = True          # Save the visualizations to disk
+    SHOW_VISUALIZATION = True          # Display the visualizations
+    SAVE_EVALUATION = True             # Save the evaluation results
+
+
+
+# ---------------- #
+# SIMPLE_INFERENCE #
+# ---------------- #
+if MODE == RUN_MODE.SIMPLE_INFERENCE:
+    WEIGHTS_PATH = "./weights/maskrcnn.pth"  # Path to the model weights file
+    USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
+
+    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb'        # Directory for RGB images
+    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep'  # Directory for depth-preprocessed images
+    WIDTH = 1920                       # Image width for processing
+    HEIGHT = 1080                      # Image height for processing
+
+    IMAGE_NAME = "3xM_0_10_10.png"     # Specific image name 
+
+    OUTPUT_DIR = "./output"            # Directory to save output files
+    USE_MASK = True                    # Whether to use masks during inference
+    OUTPUT_TYPE = "png"                # Output format: 'numpy-array' or 'png'
+    SHOULD_SAVE = True                 # Decides whether to save the mask or not -> mask will be returned
 
 
 
@@ -1742,28 +1799,29 @@ def eval_pred(pred, ground_truth, name="instance_segmentation", should_print=Tru
 
 
 
-def inference(  weights_path,
-                img_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb',
-                depth_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep',
-                mask_dir = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/mask-prep',
-                amount=100,     # for random mode
-                start_idx=0,    # for range mode
-                end_idx=99,     # for range mode
-                image_name="3xM_0_10_10.jpg", # for single mode
-                data_mode=DATA_LOADING_MODE.ALL,
-                num_workers=4,
-                use_mask=True,
-                use_depth=False,
-                output_type="jpg",
-                output_dir="./output",
-                should_visualize=True,
-                visualization_dir="./output/visualizations",
-                save_visualization=True,
-                save_evaluation=True,
-                show_visualization=True,
-                width=1920,
-                height=1080
-            ):
+def inference(  
+        weights_path,
+        img_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb',
+        depth_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep',
+        mask_dir = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/mask-prep',
+        amount=100,     # for random mode
+        start_idx=0,    # for range mode
+        end_idx=99,     # for range mode
+        image_name="3xM_0_10_10.jpg", # for single mode
+        data_mode=DATA_LOADING_MODE.ALL,
+        num_workers=4,
+        use_mask=True,
+        use_depth=False,
+        output_type="jpg",
+        output_dir="./output",
+        should_visualize=True,
+        visualization_dir="./output/visualizations",
+        save_visualization=True,
+        save_evaluation=True,
+        show_visualization=True,
+        width=1920,
+        height=1080
+    ):
     """
     Perform inference using a Mask R-CNN model with the provided dataset and parameters, while also
     supporting visualization and evaluation of the results.
@@ -1916,6 +1974,108 @@ def inference(  weights_path,
                         plt.show()
                     else:
                         plt.clf()
+
+def simple_inference(   
+        weights_path,
+        img_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb',
+        depth_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep',
+        image_name="3xM_0_10_10.png",
+        use_depth=False,
+        should_save=True,
+        output_type="png",
+        output_dir="./output",
+        width=1920,
+        height=1080
+    ):
+    """
+    Perform simple single inference using a Mask R-CNN model with the provided dataset and parameters, 
+    without visualization and evaluation of the results.
+
+    Args:
+    -----
+        weights_path (str): Path to the pretrained Mask R-CNN model weights.
+        img_dir (str): Directory containing RGB images for inference.
+        depth_dir (str): Directory containing depth-prepared images (if applicable).
+        image_name (str): Image name.
+        use_depth (bool): Whether to include depth information for the model inference.
+        should_save (bool): Decides if the result masks should get saved or not.
+        output_type (str): Format to save the inferred masks, options are ['jpg', 'png', 'npy'].
+        output_dir (str): Directory to save the inference results.
+        width (int): Image width for resizing during inference.
+        height (int): Image height for resizing during inference.
+
+    Returns:
+    --------
+        np.Array: This function outputs the masks from one inference and saves results.
+    """
+
+    print(f"xX Mask-RCNN Simple Inference Xx")
+
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    print(f"Using {device}")
+
+    model_name = ".".join(weights_path.split("/")[-1].split(".")[:-1])
+
+    with torch.no_grad():
+        # create model
+        model = load_maskrcnn(weights_path=weights_path, use_4_channels=use_depth, pretrained=False)
+        model.eval()
+        model = model.to(device)
+
+        # load data
+        img_path = os.path.join(img_dir, image_name)
+        depth_path = os.path.join(depth_dir, image_name)
+
+        # Load the RGB Image, Depth Image and the Gray Mask (and make sure that the size is right)
+        image = cv2.imread(img_path)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # image = resize_with_padding(image, target_h=self.height, target_w=self.width, method=cv2.INTER_LINEAR)
+        
+        if use_depth:
+            depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
+            _, depth, _, _ =  cv2.split(depth)
+
+        # Apply transformations
+        transform = Inference_Augmentations(width=width, height=height)
+        if use_depth:
+            image, depth, _ = transform(image, depth, None)
+        else:
+            image, _, _ = transform(image, None, None)
+
+        # Add Depth to Image as 4th Channel
+        if use_depth:
+            # Ensure depth is a 2D array
+            if depth.ndim == 2:
+                depth = np.expand_dims(depth, axis=-1)  # Add an extra dimension for depth channel
+            
+            # Concatenate along the channel axis to form an RGBA image (4th channel is depth)
+            image = np.concatenate((image, depth), axis=-1)
+        
+        # image to tensor
+        image = T.ToTensor()(image)
+
+        # send to device + add batch hull
+        image = image.to(device).unsqueeze(0)
+
+        # inference
+        result = model(image)
+        
+        # save mask
+        if should_save:
+            os.makedirs(output_dir, exist_ok=True)
+
+            result = {key: value.to(torch.device("cpu")) for key, value in result.items()}
+            cleaned_name = model_name + "_" + ".".join(image_name.split(".")[:-1])
+
+            extracted_mask = extract_and_visualize_mask(result['masks'], image=None, ax=None, visualize=False, color_map=None, soft_join=False)
+            if output_type in ["numpy", "npy"]:
+                np.save(os.path.join(output_dir, f'{cleaned_name}.npy'), extracted_mask)
+            else:
+                # recommended
+                cv2.imwrite(os.path.join(output_dir, f'{cleaned_name}.png'), extracted_mask)
+
+
+        return extracted_mask
 
 
 
