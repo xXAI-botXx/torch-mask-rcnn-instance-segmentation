@@ -49,6 +49,8 @@ By Tobia Ippolito <3
 ###############
 # definitions #
 ###############
+from enum import Enum
+
 class DATA_LOADING_MODE(Enum):
     ALL = "all"
     RANGE = "range"
@@ -80,12 +82,12 @@ MODE = RUN_MODE.TRAIN
 # TRAINING #
 # -------- #
 if MODE == RUN_MODE.TRAIN:
-    WEIGHTS_PATH = "./weights/maskrcnn.pth"  # Path to the model weights file
+    WEIGHTS_PATH = None  # Path to the model weights file
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
 
-    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb'        # Directory for RGB images
-    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep'  # Directory for depth-preprocessed images
-    MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/mask-prep'    # Directory for mask-preprocessed images
+    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
+    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
+    MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask'    # Directory for mask-preprocessed images
     WIDTH = 1920                       # Image width for processing
     HEIGHT = 1080                      # Image height for processing
 
@@ -98,10 +100,10 @@ if MODE == RUN_MODE.TRAIN:
     NUM_WORKERS = 4                    # Number of workers for data loading
 
     MULTIPLE_DATASETS = None           # Path to folder for training multiple models
-    NAME = 'mask_rcnn'                 # Name of the model to use
+    NAME = 'mask_rcnn_TEST'                 # Name of the model to use
 
     USING_EXPERIMENT_TRACKING = True   # Enable experiment tracking
-    CREATE_NEW_EXPERIMENT = True       # Whether to create a new experiment run
+    CREATE_NEW_EXPERIMENT = False       # Whether to create a new experiment run
     # EXPERIMENT_ID = 12345            # Optional ID for the experiment
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
@@ -176,7 +178,6 @@ if MODE == RUN_MODE.SIMPLE_INFERENCE:
 
 # basics
 import os
-from enum import Enum
 from datetime import datetime, timedelta
 import time
 from IPython.display import clear_output
@@ -186,17 +187,25 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2 
+from PIL import Image    # for PyTorch Transformations
 
 # deep learning
 import torch
 from torch.utils.data import Dataset, DataLoader
-from torch.utils.tensorboard import SummaryWriter
 
 import torchvision
 from torchvision.models.detection import MaskRCNN
+# from torchvision.models.detection import maskrcnn_resnet50_fpn
+# from torchvision.models.detection import MaskRCNN_ResNet50_FPN_Weights
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
+from torchvision.models import ResNet50_Weights
 # from torchvision.transforms import functional as F
 import torchvision.transforms as T
+
+# experiment tracking
+from torch.utils.tensorboard import SummaryWriter
+import mlflow
+import mlflow.pytorch
 
 
 ###########
@@ -231,8 +240,9 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True):
         model (MaskRCNN): 
             The initialized Mask R-CNN model instance, ready for training or inference.
     """
-    backbone = resnet_fpn_backbone('resnet50', pretrained=pretrained)
+    backbone = resnet_fpn_backbone(backbone_name='resnet50', weights=ResNet50_Weights.IMAGENET1K_V1)
     model = MaskRCNN(backbone, num_classes=2)  # 2 Classes (Background + 1 Object)
+    # odel = maskrcnn_resnet50_fpn(weights=MaskRCNN_ResNet50_FPN_Weights.DEFAULT, num_classes=2)    # ResNet50_Weights.DEFAULT
 
     if use_4_channels:
         # Change the first Conv2d-Layer for 4 Channels
@@ -258,6 +268,15 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True):
         model.load_state_dict(torch.load(weights_path)) 
     
     return model
+
+
+
+def clear_printing():
+    # terminal
+    os.system('cls' if os.name == 'nt' else 'clear')
+    
+    # notebook
+    clear_output()
 
 
 
@@ -350,7 +369,9 @@ class Dual_Dir_Dataset(Dataset):
                 use_depth=False,
                 log_path=None,
                 width=1920,
-                height=1080
+                height=1080,
+                should_print=True,
+                should_log=True
                 ):
 
         self.img_dir = img_dir
@@ -362,12 +383,16 @@ class Dual_Dir_Dataset(Dataset):
         self.log_path = log_path
         self.width = width
         self.height = height
-        self.img_names = self.load_datanames(image_path=img_dir, 
-                                                amount=amount, 
-                                                start_idx=start_idx, 
-                                                end_idx=end_idx, 
-                                                image_name=image_name, 
-                                                data_mode=data_mode)
+        self.should_print = should_print
+        self.should_log = should_log
+        self.img_names = self.load_datanames(
+                                        path_to_images=img_dir, 
+                                        amount=amount, 
+                                        start_idx=start_idx, 
+                                        end_idx=end_idx, 
+                                        image_name=image_name, 
+                                        data_mode=data_mode
+                                        )
         
         self.verify_data()
 
@@ -399,10 +424,6 @@ class Dual_Dir_Dataset(Dataset):
             if len(mask.shape) > 2:
                 mask = self.rgb_mask_to_grey_mask(rgb_img=mask, verify=False)
             # mask = resize_with_padding(mask, target_h=self.height, target_w=self.width, method=cv2.INTER_NEAREST)
-        
-            # # check mask
-            # if len(np.unique(mask)) <= 1: 
-            #     return None, None
 
         # Apply transformations
         if self.transform:
@@ -428,26 +449,33 @@ class Dual_Dir_Dataset(Dataset):
         image = T.ToTensor()(image)
 
         if self.use_mask:
-            # Create List of Binary Masks
-            obj_ids = np.unique(mask)
-            obj_ids = obj_ids[obj_ids != 0]    # remove background
-            masks = np.zeros((len(obj_ids), mask.shape[0], mask.shape[1]), dtype=np.uint8)
+           
+            # check objects in masks -> if empty than create empty mask
+            if len(np.unique(mask)) <= 1:  
+                target = {
+                    'boxes': torch.zeros((0, 4), dtype=torch.float32),  # No bounding boxes
+                    'labels': torch.zeros((0,), dtype=torch.int64),     # No labels
+                    'masks': torch.zeros((0, self.height, self.width), dtype=torch.uint8),  # No masks
+                }
+            else:
+                 # Create List of Binary Masks
+                obj_ids = np.unique(mask)
+                obj_ids = obj_ids[obj_ids != 0]    # remove background
+                masks = np.zeros((len(obj_ids), mask.shape[0], mask.shape[1]), dtype=np.uint8)
 
-            for i, obj_id in enumerate(obj_ids):
-                if obj_id == 0:  # Background
-                    continue
-                masks[i] = (mask == obj_id).astype(np.uint8)
+                for i, obj_id in enumerate(obj_ids):
+                    if obj_id == 0:  # Background
+                        continue
+                    masks[i] = (mask == obj_id).astype(np.uint8)
 
-            # Convert the RGB image and the masks to a torch tensor
-            masks = torch.as_tensor(masks, dtype=torch.uint8)
-
-        
-
-            target = {
-                "masks": masks,
-                "boxes": self.get_bounding_boxes(masks),
-                "labels": torch.ones(masks.shape[0], dtype=torch.int64)  # Set all IDs to 1 -> just one class type
-            }
+                # Convert the masks to a torch tensor
+                masks = torch.as_tensor(masks, dtype=torch.uint8)
+            
+                target = {
+                    "masks": masks,
+                    "boxes": self.get_bounding_boxes(masks),
+                    "labels": torch.ones(masks.shape[0], dtype=torch.int64)  # Set all IDs to 1 -> just one class type
+                }
             
             return image, target, img_name
         else:
@@ -470,7 +498,7 @@ class Dual_Dir_Dataset(Dataset):
 
     def verify_data(self):
         updated_images = []
-        log(self.log_path, f"\n{'-'*32}\nVerifying Data...")
+        log(self.log_path, f"\n{'-'*32}\nVerifying Data...", should_log=self.should_log, should_print=self.should_print)
 
         images_found = 0
         images_not_found = []
@@ -482,16 +510,18 @@ class Dual_Dir_Dataset(Dataset):
         if self.use_depth:
             depth_found = 0
             depth_not_found = []
+            
+        all_images_size = len(self.img_names)
 
-        for cur_image in self.img_names:
+        for idx, cur_image in enumerate(self.img_names):
 
             # Check RGB Image
             image_path = os.path.join(self.img_dir, cur_image)
             image_exists = os.path.exists(image_path) and os.path.isfile(image_path) and any([image_path.endswith(ending) for ending in [".png", ".jpg", ".jpeg"]])
             
             if image_exists:
-                rgb_img = cv2.imread(image_path)
-                rgb_shape = rgb_img.shape[:2]  # Height and Width (ignore channels)
+                # rgb_img = cv2.imread(image_path)
+                # rgb_shape = rgb_img.shape[:2]  # Height and Width (ignore channels)
                 images_found += 1
             else:
                 images_not_found += [image_path]
@@ -502,15 +532,16 @@ class Dual_Dir_Dataset(Dataset):
                 depth_exists = os.path.exists(depth_path) and os.path.isfile(depth_path) and any([depth_path.endswith(ending) for ending in [".png", ".jpg", ".jpeg"]])
 
                 if depth_exists:
-                    if image_exists:
-                        depth_img = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
-                        depth_shape = depth_img.shape[:2]
-                        if rgb_shape == depth_shape:
-                            depth_found += 1
-                        else:
-                            depth_not_found += [depth_path]
-                    else:
-                        depth_found += 1
+                    depth_found += 1
+                    # if image_exists:
+                    #     depth_img = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
+                    #     depth_shape = depth_img.shape[:2]
+                    #     if rgb_shape == depth_shape:
+                    #         depth_found += 1
+                    #     else:
+                    #         depth_not_found += [depth_path]
+                    # else:
+                    #     depth_found += 1
                 else:
                     depth_not_found += [depth_path]
 
@@ -519,19 +550,19 @@ class Dual_Dir_Dataset(Dataset):
                 mask_path = os.path.join(self.mask_dir, cur_image)
                 mask_exists = os.path.exists(mask_path) and os.path.isfile(mask_path) and any([mask_path.endswith(ending) for ending in [".png", ".jpg", ".jpeg"]])
                 # check if mask has an object
-                if mask_exists:
-                    mask_img = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)    # cv2.IMREAD_GRAYSCALE)
-                    if len(mask.shape) > 2:
-                        mask = self.rgb_mask_to_grey_mask(rgb_img=mask, verify=False)
+                # if mask_exists:
+                #     mask_img = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)    # cv2.IMREAD_GRAYSCALE)
+                #     # if len(mask_img.shape) > 2:
+                #     #     mask = self.rgb_mask_to_grey_mask(rgb_img=mask_img, verify=False)
 
-                    if len(np.unique(mask_img)) <= 1:
-                        mask_exists = False
-                    else:
-                        if image_exists:
-                            mask_shape = mask_img.shape[:2]
+                #     if len(np.unique(mask_img)) <= 1:
+                #         mask_exists = False
+                    # else:
+                    #     if image_exists:
+                    #         mask_shape = mask_img.shape[:2]
 
-                            if rgb_shape != mask_shape:
-                                mask_exists = False
+                    #         if rgb_shape != mask_shape:
+                    #             mask_exists = False
                 
                 if mask_exists:
                     masks_found += 1
@@ -551,43 +582,52 @@ class Dual_Dir_Dataset(Dataset):
             else:
                 if image_exists:
                     updated_images += [cur_image]
+                    
+            # print
+            # progress = round((idx / all_images_size), 2)
+            # progress = (idx / all_images_size)
+            # if (progress % 0.10) <= 0.001 == 0:
+            #     progress_bar_size = 10
+            #     progress_bar = int(progress * progress_bar_size)
+            #     white_spaces = int(progress_bar_size - progress_bar)
+            #     log(self.log_path, f"[{'#'*progress_bar}{' '*white_spaces}]", should_log=self.should_log, should_print=self.should_print)
 
         # Log/Print Verification Results
-        log(self.log_path, f"\n> > > Images < < <\nFound: {round((images_found/len(self.img_names))*100, 2)}% ({images_found}/{len(self.img_names)})")
+        log(self.log_path, f"\n> > > Images < < <\nFound: {round((images_found/len(self.img_names))*100, 2)}% ({images_found}/{len(self.img_names)})", should_log=self.should_log, should_print=self.should_print)
     
         if len(images_not_found) > 0:
-            log(self.log_path, "\n Not Found:")
+            log(self.log_path, "\n Not Found:", should_log=self.should_log, should_print=self.should_print)
             
         for not_found in images_not_found:
-            log(self.log_path, f"    -> {not_found}")
+            log(self.log_path, f"    -> {not_found}", should_log=self.should_log, should_print=self.should_print)
 
 
         if self.use_depth:
-            log(self.log_path, f"\n> > > Depth-images < < <\nFound: {round((depth_found/len(self.img_names))*100, 2)}% ({depth_found}/{len(self.img_names)})")
+            log(self.log_path, f"\n> > > Depth-images < < <\nFound: {round((depth_found/len(self.img_names))*100, 2)}% ({depth_found}/{len(self.img_names)})", should_log=self.should_log, should_print=self.should_print)
                 
             if len(depth_not_found) > 0:
-                log("\n Not Found:")
+                log("\n Not Found:", should_log=self.should_log, should_print=self.should_print)
                 
             for not_found in depth_not_found:
-                log(self.log_path, f"    -> {not_found}")
+                log(self.log_path, f"    -> {not_found}", should_log=self.should_log, should_print=self.should_print)
 
 
         if self.use_mask:
-            log(self.log_path, f"\n> > > Masks < < <\nFound: {round((masks_found/len(self.img_names))*100, 2)}% ({masks_found}/{len(self.img_names)})")
+            log(self.log_path, f"\n> > > Masks < < <\nFound: {round((masks_found/len(self.img_names))*100, 2)}% ({masks_found}/{len(self.img_names)})", should_log=self.should_log, should_print=self.should_print)
                 
             if len(masks_not_found) > 0:
-                log("\n Not Found:")
+                log("\n Not Found:", should_log=self.should_log, should_print=self.should_print)
                 
             for not_found in masks_not_found:
-                log(self.log_path, f"    -> {not_found}")
+                log(self.log_path, f"    -> {not_found}", should_log=self.should_log, should_print=self.should_print)
 
 
-        log(self.log_path, f"\nUpdating Images...")
-        log(self.log_path, f"From {len(self.img_names)} to {len(updated_images)} Images\n    -> Image amount reduced by {round(( 1-(len(updated_images)/len(self.img_names)) )*100, 2)}%")
+        log(self.log_path, f"\nUpdating Images...", should_log=self.should_log, should_print=self.should_print)
+        log(self.log_path, f"From {len(self.img_names)} to {len(updated_images)} Images\n    -> Image amount reduced by {round(( 1-(len(updated_images)/len(self.img_names)) )*100, 2)}%", should_log=self.should_log, should_print=self.should_print)
         
         # set new updated image ID's
         self.img_names = updated_images
-        log(self.log_path, f"{'-'*32}\n")
+        log(self.log_path, f"{'-'*32}\n", should_log=self.should_log, should_print=self.should_print)
 
 
 
@@ -622,8 +662,8 @@ class Dual_Dir_Dataset(Dataset):
         for cur_idx in data_indices:
             images += [all_images[cur_idx]]
 
-        log(self.log_path, f"Image Indices:\n{data_indices}")
-        log(self.log_path, f"Data Amount: {len(images)}")
+        log(self.log_path, f"Image Indices:\n{data_indices}", should_log=self.should_log, should_print=self.should_print)
+        log(self.log_path, f"Data Amount: {len(images)}", should_log=self.should_log, should_print=self.should_print)
 
         # data_amount = len(images)
         return images
@@ -742,8 +782,9 @@ def collate_fn(batch):
 
 # Custom Transformations
 class Random_Flip:
-    def __call__(self, rgb_img, depth_img, mask_img):
-        # rgb_img, depth_img, mask_img = images
+    def __call__(self, images):
+        rgb_img, depth_img, mask_img = images
+        
         if random.random() > 0.6:
             # Horizontal Flipping
             rgb_img = T.functional.hflip(rgb_img)
@@ -766,8 +807,9 @@ class Random_Rotation:
     def __init__(self, max_angle=30):
         self.max_angle = max_angle
     
-    def __call__(self, rgb_img, depth_img, mask_img):
-        # rgb_img, depth_img, mask_img = images
+    def __call__(self, images):
+        rgb_img, depth_img, mask_img = images
+        
         if random.random() > 0.6:
             angle = random.uniform(-self.max_angle, self.max_angle)
             rgb_img = T.functional.rotate(rgb_img, angle)
@@ -785,7 +827,9 @@ class RandomCrop:
         self.min_crop_size = min_crop_size
         self.max_crop_size = max_crop_size
     
-    def __call__(self, rgb_img, depth_img, mask_img):
+    def __call__(self, images):
+        rgb_img, depth_img, mask_img = images
+        
         if random.random() > 0.7:
             # random crop-size
             random_h = random.randint(self.min_crop_size[0], self.max_crop_size[0])
@@ -811,13 +855,15 @@ class Random_Brightness_Contrast:
         self.brightness = brightness_range
         self.contrast = contrast_range
 
-    def __call__(self, rgb_img, depth_img, mask_img):
-        # rgb_img, depth_img, mask_img = images
+    def __call__(self, images):
+        rgb_img, depth_img, mask_img = images
+        
         if random.random() > 0.6:
             brightness_factor = random.uniform(1 - self.brightness, 1 + self.brightness)
             contrast_factor = random.uniform(1 - self.contrast, 1 + self.contrast)
             rgb_img = T.functional.adjust_brightness(rgb_img, brightness_factor)
             rgb_img = T.functional.adjust_contrast(rgb_img, contrast_factor)
+        
         return rgb_img, depth_img, mask_img
 
 
@@ -827,18 +873,28 @@ class Add_Gaussian_Noise:
         self.mean = mean
         self.std = std
     
-    def __call__(self, rgb_img, depth_img, mask_img):
-        # rgb_img, depth_img, mask_img = images
-        if random.random() > 0.6:
-            noise_rgb = torch.randn(rgb_img.size()) * self.std + self.mean
-            rgb_img = torch.clamp(rgb_img + noise_rgb, 0, 1)
+    def __call__(self, images):
+        rgb_img, depth_img, mask_img = images
 
+        # Convert Pillow image to NumPy array
+        rgb_img_np = np.array(rgb_img)
+        
+        # Apply Gaussian noise to RGB image
         if random.random() > 0.6:
-            if depth_img is not None:
-                noise = torch.randn(depth_img.size()) * self.std + self.mean
-                depth_img = torch.clamp(depth_img + noise, 0, 1)
+            noise_rgb = np.random.randn(*rgb_img_np.shape) * self.std + self.mean
+            rgb_img_np = np.clip(rgb_img_np + noise_rgb, 0, 255).astype(np.uint8)
+        
+        # Convert back to Pillow image
+        rgb_img = Image.fromarray(rgb_img_np)
+
+        # Handle depth image if it's not None
+        if random.random() > 0.6 and depth_img is not None:
+            depth_img_np = np.array(depth_img)
+            noise_depth = np.random.randn(*depth_img_np.shape) * self.std + self.mean
+            depth_img_np = np.clip(depth_img_np + noise_depth, 0, 255).astype(np.uint8)
+            depth_img = Image.fromarray(depth_img_np)
+
         return rgb_img, depth_img, mask_img
-
 
 
 class Random_Gaussian_Blur:
@@ -846,12 +902,15 @@ class Random_Gaussian_Blur:
         self.kernel_size = kernel_size
         self.sigma = sigma
 
-    def __call__(self, rgb_img, depth_img, mask_img):
+    def __call__(self, images):
+        rgb_img, depth_img, mask_img = images
+        
         if random.random() > 0.95:
             sigma = random.uniform(*self.sigma)
             rgb_img = T.GaussianBlur(kernel_size=self.kernel_size, sigma=sigma)(rgb_img)
             if depth_img is not None:
                 depth_img = T.GaussianBlur(kernel_size=self.kernel_size, sigma=sigma)(depth_img)
+        
         return rgb_img, depth_img, mask_img
 
 
@@ -860,8 +919,9 @@ class Random_Scale:
     def __init__(self, scale_range=(0.8, 1.2)):
         self.scale_range = scale_range
     
-    def __call__(self, rgb_img, depth_img, mask_img):
-        # rgb_img, depth_img, mask_img = images
+    def __call__(self, images):
+        rgb_img, depth_img, mask_img = images
+        
         if random.random() > 0.6:
             scale_factor = random.uniform(self.scale_range[0], self.scale_range[1])
             h, w = rgb_img.size[-2:]
@@ -871,6 +931,7 @@ class Random_Scale:
                 depth_img = T.functional.resize(depth_img, new_size, interpolation=T.InterpolationMode.NEAREST)
             if mask_img is not None:
                 mask_img = T.functional.resize(mask_img, new_size, interpolation=T.InterpolationMode.NEAREST)
+        
         return rgb_img, depth_img, mask_img
 
 
@@ -879,14 +940,26 @@ class Resize:
     def __init__(self, width=1920, height=1080):
         self.target_size = (height, width)
 
-    def __call__(self, rgb_img, depth_img, mask_img):
-        height, width = rgb_img.shape[:2]
+    def __call__(self, images):
+        rgb_img, depth_img, mask_img = images
+        
+        resize_transform = T.Resize(self.target_size)
+        
+        # resize rgb image
+        width, height  = rgb_img.size
         if (height, width) != self.target_size:
-            resize_transform = T.Resize(self.target_size)
             rgb_img = resize_transform(rgb_img)
-            if depth_img is not None:
+        
+        # resize depth data
+        if depth_img is not None:
+            width, height = depth_img.size
+            if (height, width) != self.target_size:
                 depth_img = resize_transform(depth_img)
-            if mask_img is not None:
+              
+        # resize mask  
+        if mask_img is not None:
+            width, height  = mask_img.size
+            if (height, width) != self.target_size:
                 mask_img = resize_transform(mask_img)
         
         return rgb_img, depth_img, mask_img
@@ -907,7 +980,17 @@ class Train_Augmentations:
         ])
 
     def __call__(self, rgb_img, depth_img, mask_img):
-        return self.augmentations(rgb_img, depth_img, mask_img)
+        
+        # Convert to Pillow
+        rgb_img, depth_img, mask_img = cv2_to_pil([rgb_img, depth_img, mask_img])
+        
+        # Apply Transformations/Augmentations
+        rgb_img, depth_img, mask_img = self.augmentations((rgb_img, depth_img, mask_img))
+        
+        # Convert back to cv2
+        rgb_img, depth_img, mask_img = pil_to_cv2([rgb_img, depth_img, mask_img])
+        
+        return rgb_img, depth_img, mask_img
 
 
 
@@ -918,7 +1001,43 @@ class Inference_Augmentations:
         ])
 
     def __call__(self, rgb_img, depth_img, mask_img):
-        return self.augmentations(rgb_img, depth_img, mask_img)
+        
+        # Convert to Pillow
+        rgb_img, depth_img, mask_img = cv2_to_pil([rgb_img, depth_img, mask_img])
+        
+        # Apply Transformations/Augmentations
+        rgb_img, depth_img, mask_img = self.augmentations((rgb_img, depth_img, mask_img))
+        
+        # Convert back to cv2
+        rgb_img, depth_img, mask_img = pil_to_cv2([rgb_img, depth_img, mask_img])
+        
+        return rgb_img, depth_img, mask_img
+
+
+
+def cv2_to_pil(images:list):
+    result = []
+    for image in images:
+        if image is None:
+            result.append(None)
+        elif isinstance(image, np.ndarray):
+            result.append(Image.fromarray(image))
+        else:
+            result.append(image)
+            
+    return result
+
+
+
+def pil_to_cv2(images:list):
+    result = []
+    for image in images:
+        if image is None:
+            result.append(None)
+        else:
+            result.append(np.array(image))
+            
+    return result
 
 
 
@@ -929,7 +1048,7 @@ class Inference_Augmentations:
 # training #
 ############
 
-def log(file_path, content, reset_logs=False, should_print=True):
+def log(file_path, content, reset_logs=False, should_log=True, should_print=True):
     """
     Logs content to a specified file and optionally prints it to the console.
 
@@ -963,13 +1082,15 @@ def log(file_path, content, reset_logs=False, should_print=True):
     """
     if file_path is None:
         return
+    
+    if should_log:
+        if not os.path.exists(file_path) or reset_logs:
+            os.makedirs("/".join(file_path.split("/")[:-1]), exist_ok=True)
+            with open(file_path, "w") as f:
+                f.write("")
 
-    if not os.path.exists(file_path) or reset_logs:
-        with open(file_path, "w") as f:
-            f.write("")
-
-    with open(file_path, "a") as f:
-        f.write(content)
+        with open(file_path, "a") as f:
+            f.write(f"’n{content}")
 
     if should_print:
         print(content)
@@ -1031,7 +1152,7 @@ def update_output(cur_epoch,
 
 
     # print new output
-    clear_output()
+    clear_printing()
 
     log(log_path, print_output)
 
@@ -1076,7 +1197,7 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     # Create Mask-RCNN with Feature Pyramid Network (FPN) as backbone
     log(log_path, "Create the model and preparing for training...")
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    model = load_maskrcnn(weights_path=weights_path, use_4_channels=use_depth, pretrained=True)
+    model = load_maskrcnn(weights_path=weights_path, use_4_channels=use_depth, pretrained=False)
     model = model.to(device)
 
     # Optimizer
@@ -1126,12 +1247,12 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                         writer.add_scalar(key, value, iteration)
 
                     if key in loss_avgs.keys():
-                        loss_avgs[key] += [value]
+                        loss_avgs[key] += [value.cpu().detach().numpy()]
                     else:
-                        loss_avgs[key] = [value]
+                        loss_avgs[key] = [value.cpu().detach().numpy()]
 
                 if experiment_tracking:
-                    total_loss = sum(loss_dict.values())
+                    total_loss = sum([value.cpu() for value in loss_dict.values()])
 
                     # make experiment tracking
                     mlflow.log_metric("total loss", total_loss, step=iteration)
@@ -1146,10 +1267,10 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                 times += [duration]
 
                 if iteration % 10 == 0:
-                    eta_str = str(timedelta(seconds=(max_iterations-iteration) * np.avg(np.array(times)))).split('.')[0]
+                    eta_str = str(timedelta(seconds=(max_iterations-iteration) * np.mean(np.array(times)))).split('.')[0]
                         
-                    total_loss = sum([np.avg(np.array(loss_avgs[k])) for k in loss_avgs.keys()])
-                    loss_labels = [[key, np.avg(np.array(value))] for key, value in loss_avgs.items()]
+                    total_loss = sum([np.mean(np.array(loss_avgs[k])) for k in loss_avgs.keys()])
+                    loss_labels = [[key, np.mean(np.array(value))] for key, value in loss_avgs.items()]
 
                     # log & print info
                     update_output(
@@ -1157,6 +1278,7 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                         cur_iteration=iteration, 
                         max_iterations=max_iterations,
                         duration=duration,
+                        eta_str=eta_str,
                         data_size=data_size,
                         total_loss=total_loss,
                         losses=loss_labels,
@@ -1174,7 +1296,7 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
             # Save Model
             torch.save(model.state_dict(), f'./weights/{name}.pth')
     except KeyboardInterrupt:
-        log(log_path, "Stopping early. Saving network...")
+        log(log_path, "\nStopping early. Saving network...")
         torch.save(model.state_dict(), f'./weights/{name}.pth')
 
         if experiment_tracking:
@@ -1197,6 +1319,7 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
         cur_iteration=iteration-1, 
         max_iterations=max_iterations,
         duration=duration,
+        eta_str=eta_str,
         data_size=data_size,
         total_loss=total_loss,
         losses=loss_labels,
@@ -1299,28 +1422,37 @@ def train(
     - The function logs training information and parameters to a log file at the specified log_path.
 
     """
+    
+    clear_printing()
+    
+    # create folders
+    os.makedirs("./weights", exist_ok=True)
+    os.makedirs("./logs", exist_ok=True)
 
     log_path = f"./logs/{name}.txt"
-    log(log_path, "", reset_logs=True, print=False)
+    log(log_path, "", reset_logs=True, should_print=False)
 
-    log(log_path, f"xX Instance Segmentation with MASK-RCNN and PyTorch Xx\n                  -> {name} <-\n")
+    welcome_str = "xX Instance Segmentation with MASK-RCNN and PyTorch Xx"
+    white_spaces = int(max(0, len(welcome_str)//2 - len(name)//2))
+    log(log_path, f"\n\n{welcome_str}\n{' '*white_spaces}-> {name} <-\n")
 
     # Dataset and DataLoader
     log(log_path, "Loading the data...")
     dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=Train_Augmentations(width=width, height=height), 
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
                                 data_mode=data_mode, use_mask=True, use_depth=use_depth, log_path=log_path,
-                                width=width, height=height)
+                                width=width, height=height, should_log=True, should_print=True)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, collate_fn=collate_fn)
 
     # Experiment Tracking
     if using_experiment_tracking:
-        import mlflow
-        import mlflow.pytorch
 
         if create_new_experiment:
-            EXPERIMENT_ID = mlflow.create_experiment(experiment_name)
-            log(log_path, f"Created Experiment '{experiment_name}' ID: {EXPERIMENT_ID}")
+            try:
+                EXPERIMENT_ID = mlflow.create_experiment(experiment_name)
+                log(log_path, f"Created Experiment '{experiment_name}' ID: {EXPERIMENT_ID}")
+            except mlflow.exceptions.MlflowException:
+                log(log_path, "WARNING: Please set 'CREATE_NEW_EXPERIMENT' to False!")
             # log(log_path, f"IMPORTANT: You should set now 'CREATE_NEW_EXPERIMENT' to False and 'EXPERIMENT_ID' to {experiment_id}.")
 
         def is_mlflow_active():
@@ -1356,8 +1488,8 @@ def train(
                 mlflow.log_param("images_path", img_dir)
                 mlflow.log_param("masks_path", mask_dir)
                 mlflow.log_param("depth_path", depth_dir)
-                # mlflow.log_param("img_width", img_width)
-                # mlflow.log_param("img_height", img_height)
+                mlflow.log_param("img_width", width)
+                mlflow.log_param("img_height", height)
 
                 mlflow.log_param("data_shuffle", shuffle)
                 mlflow.log_param("data_mode", data_mode.value)
@@ -1862,7 +1994,7 @@ def inference(
         - Evaluation is done when ground-truth masks are provided, comparing prediction accuracy.
     """
 
-    print(f"xX Mask-RCNN Inference Xx")
+    print(f"\n\nxX Mask-RCNN Inference Xx")
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     print(f"Using {device}")
@@ -1870,7 +2002,7 @@ def inference(
     dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=Inference_Augmentations(width=width, height=height), 
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
                                 data_mode=data_mode, use_mask=use_mask, use_depth=use_depth, log_path=None,
-                                width=width, height=height)
+                                width=width, height=height, should_log=False, should_print=True)
     data_loader = DataLoader(dataset, batch_size=1, num_workers=num_workers, collate_fn=collate_fn)
 
     model_name = ".".join(weights_path.split("/")[-1].split(".")[:-1])
@@ -1893,14 +2025,14 @@ def inference(
 
             images = list(image.to(device) for image in images)    # when only one image and no list -> for batch: .unsqueeze(0)
 
-            # # inference
+            # inference
             results = model(images)
             
             # save mask
             os.makedirs(output_dir, exist_ok=True)
 
             for idx, result in enumerate(results):    # does the results really just stacked?
-                result = {key: value.to(torch.device("cpu")) for key, value in result.items()}
+                result = {key: value.cpu() for key, value in result.items()}
                 cleaned_name = model_name + "_" + ".".join(names[idx].split(".")[:-1])
 
                 extracted_mask = extract_and_visualize_mask(result['masks'], image=None, ax=None, visualize=False, color_map=None, soft_join=False)
@@ -2009,7 +2141,7 @@ def simple_inference(
         np.Array: This function outputs the masks from one inference and saves results.
     """
 
-    print(f"xX Mask-RCNN Simple Inference Xx")
+    print(f"\n\nxX Mask-RCNN Simple Inference Xx")
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     print(f"Using {device}")
@@ -2064,7 +2196,7 @@ def simple_inference(
         if should_save:
             os.makedirs(output_dir, exist_ok=True)
 
-            result = {key: value.to(torch.device("cpu")) for key, value in result.items()}
+            result = {key: value.cpu() for key, value in result.items()}
             cleaned_name = model_name + "_" + ".".join(image_name.split(".")[:-1])
 
             extracted_mask = extract_and_visualize_mask(result['masks'], image=None, ax=None, visualize=False, color_map=None, soft_join=False)
@@ -2086,7 +2218,7 @@ if __name__ == "__main__":
     image_path = "/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb/3xM_4_1_1.png"  
     output_path = "./output/3xM_4_1_1.png" 
 
-    if SHOULD_TRAIN:
+    if MODE == RUN_MODE.TRAIN:
         if MULTIPLE_DATASETS is not None:
             datasets = os.listdir(MULTIPLE_DATASETS)
         else:
@@ -2122,7 +2254,6 @@ if __name__ == "__main__":
                 end_idx=END_IDX,       # for range mode
                 image_name=IMAGE_NAME, # for single mode
                 data_mode=DATA_MODE,
-                use_mask=USE_MASK,
                 use_depth=USE_DEPTH,
                 using_experiment_tracking=USING_EXPERIMENT_TRACKING,
                 create_new_experiment=CREATE_NEW_EXPERIMENT,    
@@ -2131,7 +2262,7 @@ if __name__ == "__main__":
                 width=WIDTH,
                 height=HEIGHT
             )
-    else:
+    elif MODE == RUN_MODE.INFERENCE:
         inference(
                 weights_path=WEIGHTS_PATH,
                 img_dir=IMG_DIR,
@@ -2154,6 +2285,19 @@ if __name__ == "__main__":
                 show_visualization=SHOW_VISUALIZATION,
                 width=WIDTH,
                 height=HEIGHT
+        )
+    elif MODE == RUN_MODE.SIMPLE_INFERENCE:
+        simple_inference(
+            weights_path=WEIGHTS_PATH,
+            img_dir=IMG_DIR,
+            depth_dir=DEPTH_DIR,
+            image_name=IMAGE_NAME,
+            use_depth=USE_DEPTH,
+            should_save=SHOULD_SAVE,
+            output_type=OUTPUT_TYPE,
+            output_dir=OUTPUT_DIR,
+            width=WIDTH,
+            height=HEIGHT
         )
     
     
