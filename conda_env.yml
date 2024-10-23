@@ -51,6 +51,8 @@ dependencies:
   - charset-normalizer=3.4.0=pyhd8ed1ab_0
   - click=8.1.7=unix_pyh707e725_0
   - cloudpickle=3.1.0=pyhd8ed1ab_1
+  - colorama=0.4.6=pyhd8ed1ab_0
+  - colorlog=6.8.2=py310hff52083_1
   - comm=0.2.2=pyhd8ed1ab_0
   - contourpy=1.3.0=py310h3788b33_2
   - cpython=3.10.15=py310hd8ed1ab_2
@@ -278,6 +280,7 @@ dependencies:
   - opentelemetry-api=1.16.0=pyhd8ed1ab_0
   - opentelemetry-sdk=1.16.0=pyhd8ed1ab_0
   - opentelemetry-semantic-conventions=0.37b0=pyhd8ed1ab_0
+  - optuna=4.0.0=pyhd8ed1ab_0
   - orc=2.0.2=h690cf93_1
   - p11-kit=0.24.1=hc5aa10d_0
   - packaging=24.1=pyhd8ed1ab_0
@@ -352,6 +355,7 @@ dependencies:
   - torchtriton=3.0.0=py310
   - torchvision=0.19.0=py310_cu124
   - tornado=6.4.1=py310ha75aee5_1
+  - tqdm=4.66.5=pyhd8ed1ab_0
   - traitlets=5.14.3=pyhd8ed1ab_0
   - typing-extensions=4.12.2=hd8ed1ab_0
   - typing_extensions=4.12.2=pyha770c72_0

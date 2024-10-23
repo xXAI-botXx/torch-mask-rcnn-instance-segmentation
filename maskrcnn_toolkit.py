@@ -61,6 +61,7 @@ class DATA_LOADING_MODE(Enum):
 
 class RUN_MODE(Enum):
     TRAIN = "train"
+    HYPERPARAMETER_TUNING = "hyperparameter_tuning"
     INFERENCE = "inference"
     SIMPLE_INFERENCE = "simple_inference"
 
@@ -74,7 +75,7 @@ class RUN_MODE(Enum):
 #############
 # Change these variables to your need
 
-MODE = RUN_MODE.INFERENCE
+MODE = RUN_MODE.TRAIN
 
 
 
@@ -85,11 +86,11 @@ if MODE == RUN_MODE.TRAIN:
     WEIGHTS_PATH = None  # Path to the model weights file
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
 
-    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
-    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
+    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb-prep'        # Directory for RGB images
+    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth-prep'  # Directory for depth-preprocessed images
     MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
-    WIDTH = 1920   # 1920, 1024, 800, 640                # Image width for processing
-    HEIGHT = 1080  # 1080, 576, 450, 360                    # Image height for processing
+    WIDTH = 800   # 1920, 1024, 800, 640                # Image width for processing
+    HEIGHT = 450  # 1080, 576, 450, 360                    # Image height for processing
 
     DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 100                       # Number of images for random mode
@@ -114,6 +115,28 @@ if MODE == RUN_MODE.TRAIN:
     BATCH_SIZE = 10                     # Batch size for training
     SHUFFLE = True                     # Shuffle the data during training
 
+
+
+# --------------------- #
+# HYPERPARAMETER TUNING #
+# --------------------- #
+if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
+    USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
+
+    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
+    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
+    MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
+    WIDTH = 800   # 1920, 1024, 800, 640                # Image width for processing
+    HEIGHT = 450  # 1080, 576, 450, 360                    # Image height for processing
+
+    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
+    AMOUNT = 100                       # Number of images for random mode
+    START_IDX = 0                      # Starting index for range mode
+    END_IDX = 99                       # Ending index for range mode
+    IMAGE_NAME = "3xM_0_10_10.png"     # Specific image name for single mode
+
+    NUM_WORKERS = 4                    # Number of workers for data loading
+    
 
 
 # --------- #
@@ -182,6 +205,7 @@ import os
 from datetime import datetime, timedelta
 import time
 from IPython.display import clear_output
+from functools import partial
 
 # image
 import random
@@ -207,6 +231,9 @@ import torchvision.transforms as T
 from torch.utils.tensorboard import SummaryWriter
 import mlflow
 import mlflow.pytorch
+
+# optimization
+import optuna
 
 
 ###########
@@ -1182,7 +1209,8 @@ def pad_masks(masks, max_num_objs):
 
 def train_loop(log_path, learning_rate, momentum, decay, num_epochs, 
                 batch_size, dataset, data_loader, name, experiment_tracking,
-                use_depth, weights_path):
+                use_depth, weights_path, should_log=True, should_save=True,
+                return_objective='model'):
     """
     Train the Mask R-CNN model with the specified parameters.
 
@@ -1200,6 +1228,9 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     experiment_tracking (bool): Whether to track experiments.
     use_depth (bool): Whether to use depth information.
     weights_path (str): Path to the pre-trained weights.
+    should_log (bool): Should there be prints and logs?
+    should_save (bool): Should the model get saved?
+    return_objective (str): Decides the return value -> 'loss', 'model'
 
     Returns:
     --------
@@ -1207,7 +1238,8 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     """
 
     # Create Mask-RCNN with Feature Pyramid Network (FPN) as backbone
-    log(log_path, "Create the model and preparing for training...")
+    if should_log:
+        log(log_path, "Create the model and preparing for training...")
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     model = load_maskrcnn(weights_path=weights_path, use_4_channels=use_depth, pretrained=False)
     model = model.to(device)
@@ -1234,7 +1266,8 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     loss_avgs = dict()
 
     # Training
-    log(log_path, "Training starts now...")
+    if should_log:
+        log(log_path, "Training starts now...")
     model.train()
     try:
         for epoch in range(num_epochs):
@@ -1285,18 +1318,19 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                     loss_labels = [[key, np.mean(np.array(value))] for key, value in loss_avgs.items()]
 
                     # log & print info
-                    update_output(
-                        cur_epoch=epoch,
-                        cur_iteration=iteration, 
-                        max_iterations=max_iterations,
-                        duration=duration,
-                        eta_str=eta_str,
-                        data_size=data_size,
-                        total_loss=total_loss,
-                        losses=loss_labels,
-                        batch_size=batch_size,
-                        log_path=log_path
-                    )
+                    if should_log:
+                        update_output(
+                            cur_epoch=epoch,
+                            cur_iteration=iteration, 
+                            max_iterations=max_iterations,
+                            duration=duration,
+                            eta_str=eta_str,
+                            data_size=data_size,
+                            total_loss=total_loss,
+                            losses=loss_labels,
+                            batch_size=batch_size,
+                            log_path=log_path
+                        )
 
                     # reset
                     times = []
@@ -1306,10 +1340,13 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                 # torch.cuda.empty_cache()
 
             # Save Model
-            torch.save(model.state_dict(), f'./weights/{name}.pth')
+            if should_save:
+                torch.save(model.state_dict(), f'./weights/{name}.pth')
     except KeyboardInterrupt:
-        log(log_path, "\nStopping early. Saving network...")
-        torch.save(model.state_dict(), f'./weights/{name}.pth')
+        if should_log:
+            log(log_path, "\nStopping early. Saving network...")
+        if should_save:
+            torch.save(model.state_dict(), f'./weights/{name}.pth')
 
         if experiment_tracking:
             try:
@@ -1326,21 +1363,28 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
         return
 
     # log & print info
-    update_output(
-        cur_epoch=num_epochs-1,
-        cur_iteration=iteration-1, 
-        max_iterations=max_iterations,
-        duration=duration,
-        eta_str=eta_str,
-        data_size=data_size,
-        total_loss=total_loss,
-        losses=loss_labels,
-        batch_size=batch_size,
-        log_path=log_path
-    )
+    if should_log:
+        update_output(
+            cur_epoch=num_epochs-1,
+            cur_iteration=iteration-1, 
+            max_iterations=max_iterations,
+            duration=duration,
+            eta_str=eta_str,
+            data_size=data_size,
+            total_loss=total_loss,
+            losses=loss_labels,
+            batch_size=batch_size,
+            log_path=log_path
+        )
 
-    log(log_path, f"\nCongratulations!!!! Your Model trained succefull!\n\n Your model waits here for you: '{f'./weights/{name}.pth'}'")
+        log(log_path, f"\nCongratulations!!!! Your Model trained succefull!\n\n Your model waits here for you: '{f'./weights/{name}.pth'}'")
 
+    if return_objective.lower() == "loss":
+        return total_loss
+    elif return_objective.lower() == "model":
+        return model
+    else:
+        return
 
 
 
@@ -1516,7 +1560,8 @@ def train(
                 train_loop(log_path=log_path, learning_rate=learning_rate, momentum=momentum, decay=decay, 
                             num_epochs=num_epochs, batch_size=batch_size, dataset=dataset, data_loader=data_loader, 
                             name=name, experiment_tracking=using_experiment_tracking, use_depth=use_depth,
-                            weights_path=weights_path)
+                            weights_path=weights_path, should_log=True, should_save=True,
+                            return_objective="None")
 
                 # close experiment tracking
                 if is_mlflow_active():
@@ -1525,7 +1570,63 @@ def train(
             train_loop(log_path=log_path, learning_rate=learning_rate, momentum=momentum, decay=decay, 
                             num_epochs=num_epochs, batch_size=batch_size, dataset=dataset, data_loader=data_loader, 
                             name=name, experiment_tracking=using_experiment_tracking, use_depth=use_depth,
-                            weights_path=weights_path)
+                            weights_path=weights_path, should_log=True, should_save=True,
+                            return_objective="None")
+
+
+
+
+def hyperparameter_optimization(trial,
+                                img_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb',
+                                depth_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep',
+                                mask_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/mask-prep',
+                                num_workers=4,
+                                amount=100,     # for random mode
+                                start_idx=0,    # for range mode
+                                end_idx=99,     # for range mode
+                                image_name="3xM_0_10_10.jpg", # for single mode
+                                data_mode=DATA_LOADING_MODE.ALL,
+                                use_depth=False,
+                                width=1920,
+                                height=1080):
+    now = datetime.now()
+    print(f"    - Start next trial ({now.hour:02}:{now.minute:02} {now.day:02}.{now.month:02}.{now.year:04})")
+    
+    dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=Train_Augmentations(width=width, height=height), 
+                                amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
+                                data_mode=data_mode, use_mask=True, use_depth=use_depth, log_path=None,
+                                width=width, height=height, should_log=True, should_print=True)
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
+    
+    # Hyperparameters to optimize
+    learning_rate = trial.suggest_loguniform('learning_rate', 1e-6, 1e-3)
+    momentum = trial.suggest_uniform('momentum', 0.7, 0.99)
+    decay = trial.suggest_loguniform('decay', 1e-6, 1e-1)
+    batch_size = trial.suggest_int('batch_size', 10, 20) 
+    num_epochs = trial.suggest_int('num_epochs', 2, 16) 
+
+    # Call training function
+    total_loss = train_loop(
+                    log_path='./logs/trial_log.txt',
+                    learning_rate=learning_rate,
+                    momentum=momentum,
+                    decay=decay,
+                    num_epochs=num_epochs,
+                    batch_size=batch_size,
+                    dataset=dataset, 
+                    data_loader=data_loader,  
+                    name='mask_rcnn_trial',
+                    experiment_tracking=False, 
+                    use_depth=False,
+                    weights_path=None,
+                    should_log=False, 
+                    should_save=False,
+                    return_objective="loss"
+                )
+
+    return total_loss
+
+
 
 
 
@@ -2306,6 +2407,35 @@ if __name__ == "__main__":
                 width=WIDTH,
                 height=HEIGHT
             )
+    elif MODE == RUN_MODE.HYPERPARAMETER_TUNING:
+        print("Start Hyperparameter optimization...")
+        
+        # add parameters to function
+        partial_optimization_func = partial(hyperparameter_optimization, 
+                                            img_dir=IMG_DIR,
+                                            depth_dir=DEPTH_DIR,
+                                            mask_dir=MASK_DIR,
+                                            num_workers=NUM_WORKERS,
+                                            amount=AMOUNT,     # for random mode
+                                            start_idx=START_IDX,    # for range mode
+                                            end_idx=END_IDX,     # for range mode
+                                            image_name=IMAGE_NAME, # for single mode
+                                            data_mode=DATA_MODE,
+                                            use_depth=USE_DEPTH,
+                                            width=WIDTH,
+                                            height=HEIGHT)
+        
+        study = optuna.create_study(direction='minimize')
+        study.optimize(partial_optimization_func, n_trials=20) 
+
+        # Print best hyperparameters
+        now = datetime.now()
+        print(f"Optimization with Optuna is finish! ({now.hour:02}:{now.minute:02} {now.day:02}.{now.month:02}.{now.year:04})")
+    
+        result_str = f"Best hyperparameters:\n{study.best_params}\n\n\nBest total loss: {study.best_value}"
+        print(result_str)
+        with open("./optuna_result.txt", "w") as optuna_file:
+            optuna_file.write(result_str)
     elif MODE == RUN_MODE.INFERENCE:
         inference(
                 weights_path=WEIGHTS_PATH,
