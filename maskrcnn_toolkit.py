@@ -74,7 +74,7 @@ class RUN_MODE(Enum):
 #############
 # Change these variables to your need
 
-MODE = RUN_MODE.TRAIN
+MODE = RUN_MODE.INFERENCE
 
 
 
@@ -87,9 +87,9 @@ if MODE == RUN_MODE.TRAIN:
 
     IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
     DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
-    MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask'    # Directory for mask-preprocessed images
-    WIDTH = 1920                       # Image width for processing
-    HEIGHT = 1080                      # Image height for processing
+    MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
+    WIDTH = 1920   # 1920, 1024, 800, 640                # Image width for processing
+    HEIGHT = 1080  # 1080, 576, 450, 360                    # Image height for processing
 
     DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 100                       # Number of images for random mode
@@ -108,10 +108,10 @@ if MODE == RUN_MODE.TRAIN:
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
     NUM_EPOCHS = 20                    # Number of training epochs
-    LEARNING_RATE = 0.005              # Learning rate for the optimizer
+    LEARNING_RATE = 0.001              # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
     DECAY = 0.0005                     # Weight decay for regularization
-    BATCH_SIZE = 2                     # Batch size for training
+    BATCH_SIZE = 10                     # Batch size for training
     SHUFFLE = True                     # Shuffle the data during training
 
 
@@ -120,19 +120,19 @@ if MODE == RUN_MODE.TRAIN:
 # INFERENCE #
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
-    WEIGHTS_PATH = "./weights/maskrcnn.pth"  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_TEST.pth"  # Path to the model weights file
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
 
-    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb'        # Directory for RGB images
-    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep'  # Directory for depth-preprocessed images
-    MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/mask-prep'    # Directory for mask-preprocessed images
+    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
+    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
+    MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
     WIDTH = 1920                       # Image width for processing
     HEIGHT = 1080                      # Image height for processing
 
-    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
-    AMOUNT = 100                       # Number of images for random mode
+    DATA_MODE = DATA_LOADING_MODE.RANGE  # Mode for loading data -> All, Random, Range, Single Image
+    AMOUNT = 10                       # Number of images for random mode
     START_IDX = 0                      # Starting index for range mode
-    END_IDX = 99                       # Ending index for range mode
+    END_IDX = 9                       # Ending index for range mode
     IMAGE_NAME = "3xM_0_10_10.jpg"     # Specific image name for single mode
 
     NUM_WORKERS = 4                    # Number of workers for data loading
@@ -143,8 +143,9 @@ if MODE == RUN_MODE.INFERENCE:
     SHOULD_VISUALIZE = True            # Whether to visualize the results
     VISUALIZATION_DIR = "./output/visualizations"  # Directory to save visualizations
     SAVE_VISUALIZATION = True          # Save the visualizations to disk
-    SHOW_VISUALIZATION = True          # Display the visualizations
+    SHOW_VISUALIZATION = False          # Display the visualizations
     SAVE_EVALUATION = True             # Save the evaluation results
+    SHOW_EVALUATION = False
 
 
 
@@ -155,8 +156,8 @@ if MODE == RUN_MODE.SIMPLE_INFERENCE:
     WEIGHTS_PATH = "./weights/maskrcnn.pth"  # Path to the model weights file
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
 
-    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb'        # Directory for RGB images
-    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep'  # Directory for depth-preprocessed images
+    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/'        # Directory for RGB images
+    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth'  # Directory for depth-preprocessed images
     WIDTH = 1920                       # Image width for processing
     HEIGHT = 1080                      # Image height for processing
 
@@ -265,7 +266,7 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True):
         model.backbone.body.conv1 = new_conv1  # Replace the old Conv1 Layer with the new one
         
     if weights_path:
-        model.load_state_dict(torch.load(weights_path)) 
+        model.load_state_dict(state_dict=torch.load(weights_path, weights_only=True)) 
     
     return model
 
@@ -416,7 +417,8 @@ class Dual_Dir_Dataset(Dataset):
         
         if self.use_depth:
             depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
-            _, depth, _, _ =  cv2.split(depth)
+            if len(depth.shape) > 2:
+                _, depth, _, _ =  cv2.split(depth)
             # depth = resize_with_padding(depth, target_h=self.height, target_w=self.width, method=cv2.INTER_LINEAR)
 
         if self.use_mask:
@@ -485,13 +487,23 @@ class Dual_Dir_Dataset(Dataset):
 
     def get_bounding_boxes(self, masks):
         boxes = []
+        
         for mask in masks:
             pos = np.where(mask == 1)
+            if len(pos[0]) == 0 or len(pos[1]) == 0:  # Check if there are no valid object pixels
+                continue  # Skip empty masks
+
             x_min = np.min(pos[1])
             x_max = np.max(pos[1])
             y_min = np.min(pos[0])
             y_max = np.max(pos[0])
-            boxes.append([x_min, y_min, x_max, y_max])
+
+            # Ensure the bounding box has positive width and height
+            if x_max > x_min and y_max > y_min:
+                boxes.append([x_min, y_min, x_max, y_max])
+        
+        if len(boxes) == 0:
+            return torch.zeros((0, 4), dtype=torch.float32)  # Return an empty tensor if no valid boxes
         return torch.as_tensor(boxes, dtype=torch.float32)
     
 
@@ -697,7 +709,7 @@ class Dual_Dir_Dataset(Dataset):
         # init new mask with only 0 -> everything is background
         grey_mask = np.zeros((height, width), dtype=np.uint8)
 
-    # Get unique RGB values for every row (axis = 0) and before tranform in a simple 2D rgb array
+        # Get unique RGB values for every row (axis = 0) and before tranform in a simple 2D rgb array
         unique_rgb_values = np.unique(rgb_img.reshape(-1, rgb_img.shape[2]), axis=0)
         
         # Create a mapping from RGB values to increasing integers
@@ -1950,7 +1962,8 @@ def inference(
         visualization_dir="./output/visualizations",
         save_visualization=True,
         save_evaluation=True,
-        show_visualization=True,
+        show_visualization=False,
+        show_evaluation=False,
         width=1920,
         height=1080
     ):
@@ -2005,6 +2018,8 @@ def inference(
                                 width=width, height=height, should_log=False, should_print=True)
     data_loader = DataLoader(dataset, batch_size=1, num_workers=num_workers, collate_fn=collate_fn)
 
+    all_images_size = len(data_loader)
+
     model_name = ".".join(weights_path.split("/")[-1].split(".")[:-1])
 
     with torch.no_grad():
@@ -2012,35 +2027,58 @@ def inference(
         model = load_maskrcnn(weights_path=weights_path, use_4_channels=use_depth, pretrained=False)
         model.eval()
         model = model.to(device)
+        
+        idx = 1
 
         for data in data_loader:
-            if use_mask:
-                images = data[0]
-                masks = data[1]
-                masks = masks.to(device)
-                names = data[2]
-            else:
-                images = data[0]
-                names = data[1]
+            
+            # print progress
+            clear_printing()
+            print(f"\n\nxX Mask-RCNN Inference Xx")
+            print(f"Using {device}\n\n\n")
+            print(f"Inference {idx}. image from {all_images_size}\n")
+            progress = (idx / all_images_size)
+            progress_bar_size = 10
+            progress_bar = int(progress * progress_bar_size)
+            white_spaces = int(progress_bar_size - progress_bar)
+            print(f"[{'#'*progress_bar}{' '*white_spaces}]")
 
-            images = list(image.to(device) for image in images)    # when only one image and no list -> for batch: .unsqueeze(0)
+            
+            if use_mask:
+                image = data[0][0].to(device).unsqueeze(0)
+                masks = data[1][0]["masks"]
+                masks = masks.to(device)
+                name = data[2][0]
+            else:
+                image = data[0][0]
+                name = data[1][0]
 
             # inference
-            results = model(images)
+            result = model(image)[0]
+            
+            # move every data to cpu and bring to right format CHW to WHC
+            image = image.cpu().numpy().squeeze(0)
+            image = np.transpose(image, (1, 2, 0))  # Convert to HWC
+            
+            if use_mask:
+                masks_gt = masks.cpu().numpy()
+                masks_gt = np.transpose(masks_gt, (1, 2, 0))
+            
+            result_masks = result['masks'].cpu().squeeze(1).numpy()
+            result_masks = np.transpose(result_masks, (1, 2, 0))
             
             # save mask
             os.makedirs(output_dir, exist_ok=True)
 
-            for idx, result in enumerate(results):    # does the results really just stacked?
-                result = {key: value.cpu() for key, value in result.items()}
-                cleaned_name = model_name + "_" + ".".join(names[idx].split(".")[:-1])
+            # result = {key: value.cpu() for key, value in result.items()}
+            cleaned_name = model_name + "_" + ".".join(name.split(".")[:-1])
 
-                extracted_mask = extract_and_visualize_mask(result['masks'], image=None, ax=None, visualize=False, color_map=None, soft_join=False)
-                if output_type in ["numpy", "npy"]:
-                    np.save(os.path.join(output_dir, f'{cleaned_name}.npy'), extracted_mask)
-                else:
-                    # recommended
-                    cv2.imwrite(os.path.join(output_dir, f'{cleaned_name}.png'), extracted_mask)
+            extracted_mask = extract_and_visualize_mask(result_masks, image=None, ax=None, visualize=False, color_map=None, soft_join=False)
+            if output_type in ["numpy", "npy"]:
+                np.save(os.path.join(output_dir, f'{cleaned_name}.npy'), extracted_mask)
+            else:
+                # recommended
+                cv2.imwrite(os.path.join(output_dir, f'{cleaned_name}.png'), extracted_mask)
 
             # plot results
             if should_visualize:
@@ -2050,17 +2088,17 @@ def inference(
                 fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=None)
                 
                 # plot original image
-                ax[0].imshow(images[idx])
+                ax[0].imshow(image)
                 ax[0].set_title("Original")
                 ax[0].axis("off")
 
                 # plot mask alone
-                _, color_image, color_map = extract_and_visualize_mask(masks, image=None, ax=ax[1], visualize=True)
+                _, color_image, color_map = extract_and_visualize_mask(result_masks, image=None, ax=ax[1], visualize=True)
                 ax[1].set_title("Prediction Mask")
                 ax[1].axis("off")
 
                 # plot result
-                _, _, _ = extract_and_visualize_mask(masks, image=images[idx], ax=ax[2], visualize=True, color_map=color_map)
+                _, _, _ = extract_and_visualize_mask(result_masks, image=image, ax=ax[2], visualize=True, color_map=color_map)
                 ax[2].set_title("Result")
                 ax[2].axis("off")
 
@@ -2078,23 +2116,24 @@ def inference(
 
             # eval and plot ground truth comparisson
             if use_mask:
-                print("Plot result in comparison to ground truth and evaluate with ground truth*")
-                mask = masks[idx].squeeze(0).numpy()
-                mask = cv2.resize(mask, extracted_mask.shape[1], extracted_mask.shape[0])
-                eval_pred(extracted_mask, mask, name=cleaned_name, should_print=True, should_save=save_evaluation, save_path=output_dir)
+                if show_evaluation:
+                    print("Plot result in comparison to ground truth and evaluate with ground truth*")
+                # mask = cv2.resize(mask, extracted_mask.shape[1], extracted_mask.shape[0])
+                masks_gt = extract_and_visualize_mask(masks_gt, image=None, ax=None, visualize=False, color_map=None, soft_join=False)
+                eval_pred(extracted_mask, masks_gt, name=cleaned_name, should_print=show_evaluation, should_save=save_evaluation, save_path=output_dir)
 
                 if should_visualize:
                     fig, ax = plt.subplots(ncols=2, nrows=1, figsize=(20, 15), sharey=True)
                     fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.1, hspace=0.1)
                     
                     # plot ground_truth
-                    mask, _ = transform_mask(mask, one_dimensional=False)
-                    ax[0].imshow(mask)
+                    mask_gt, _ = transform_mask(masks_gt, one_dimensional=False)
+                    ax[0].imshow(mask_gt)
                     ax[0].set_title("Ground Truth Mask")
                     ax[0].axis("off")
 
                     # plot prediction mask
-                    _, color_image, color_map = extract_and_visualize_mask(masks, image=None, ax=ax[1], visualize=True, color_map=color_map)
+                    _, color_image, color_map = extract_and_visualize_mask(result_masks, image=None, ax=ax[1], visualize=True, color_map=color_map)
                     ax[1].set_title("Predicted Mask")
                     ax[1].axis("off")
 
@@ -2106,6 +2145,8 @@ def inference(
                         plt.show()
                     else:
                         plt.clf()
+                        
+            idx += 1
 
 def simple_inference(   
         weights_path,
@@ -2192,14 +2233,17 @@ def simple_inference(
         # inference
         result = model(image)
         
+        result_masks = result['masks'].cpu().squeeze(1).numpy()
+        result_masks = np.transpose(result_masks, (1, 2, 0))
+        
         # save mask
         if should_save:
             os.makedirs(output_dir, exist_ok=True)
 
-            result = {key: value.cpu() for key, value in result.items()}
+            # result = {key: value.cpu() for key, value in result.items()}
             cleaned_name = model_name + "_" + ".".join(image_name.split(".")[:-1])
 
-            extracted_mask = extract_and_visualize_mask(result['masks'], image=None, ax=None, visualize=False, color_map=None, soft_join=False)
+            extracted_mask = extract_and_visualize_mask(result_masks, image=None, ax=None, visualize=False, color_map=None, soft_join=False)
             if output_type in ["numpy", "npy"]:
                 np.save(os.path.join(output_dir, f'{cleaned_name}.npy'), extracted_mask)
             else:
@@ -2283,6 +2327,7 @@ if __name__ == "__main__":
                 save_visualization=SAVE_VISUALIZATION,
                 save_evaluation=SAVE_EVALUATION,
                 show_visualization=SHOW_VISUALIZATION,
+                show_evaluation=SHOW_EVALUATION,
                 width=WIDTH,
                 height=HEIGHT
         )
