@@ -75,7 +75,7 @@ class RUN_MODE(Enum):
 #############
 # Change these variables to your need
 
-MODE = RUN_MODE.HYPERPARAMETER_TUNING
+MODE = RUN_MODE.TRAIN
 
 
 
@@ -86,13 +86,13 @@ if MODE == RUN_MODE.TRAIN:
     WEIGHTS_PATH = None  # Path to the model weights file
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
 
-    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb-prep'        # Directory for RGB images
-    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth-prep'  # Directory for depth-preprocessed images
+    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
+    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
     MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
-    WIDTH = 800   # 1920, 1024, 800, 640                # Image width for processing
-    HEIGHT = 450  # 1080, 576, 450, 360                    # Image height for processing
+    WIDTH = 1920   # 1920, 1024, 800, 640                # Image width for processing
+    HEIGHT = 1080  # 1080, 576, 450, 360                    # Image height for processing
 
-    DATA_MODE = DATA_LOADING_MODE.RANGE  # Mode for loading data -> All, Random, Range, Single Image
+    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 100                       # Number of images for random mode
     START_IDX = 0                      # Starting index for range mode
     END_IDX = 99                       # Ending index for range mode
@@ -112,7 +112,7 @@ if MODE == RUN_MODE.TRAIN:
     LEARNING_RATE = 0.001              # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
     DECAY = 0.0005                     # Weight decay for regularization
-    BATCH_SIZE = 10                     # Batch size for training
+    BATCH_SIZE = 8                  # Batch size for training
     SHUFFLE = True                     # Shuffle the data during training
 
 
@@ -412,7 +412,8 @@ class Dual_Dir_Dataset(Dataset):
         self.width = width
         self.height = height
         self.should_print = should_print
-        self.should_log = should_log
+        self.should_log = should_log,
+        self.background_value = 1    # will be auto setted in verification
         self.img_names = self.load_datanames(
                                         path_to_images=img_dir, 
                                         amount=amount, 
@@ -480,7 +481,9 @@ class Dual_Dir_Dataset(Dataset):
         if self.use_mask:
            
             # check objects in masks -> if empty than create empty mask
-            if len(np.unique(mask)) <= 1:  
+            obj_ids = np.unique(mask)
+            obj_ids = obj_ids[obj_ids != self.background_value]
+            if len(obj_ids) <= 0:  
                 target = {
                     'boxes': torch.zeros((0, 4), dtype=torch.float32),  # No bounding boxes
                     'labels': torch.zeros((0,), dtype=torch.int64),     # No labels
@@ -488,12 +491,10 @@ class Dual_Dir_Dataset(Dataset):
                 }
             else:
                  # Create List of Binary Masks
-                obj_ids = np.unique(mask)
-                obj_ids = obj_ids[obj_ids != 0]    # remove background
                 masks = np.zeros((len(obj_ids), mask.shape[0], mask.shape[1]), dtype=np.uint8)
 
                 for i, obj_id in enumerate(obj_ids):
-                    if obj_id == 0:  # Background
+                    if obj_id == self.background_value:  # Background
                         continue
                     masks[i] = (mask == obj_id).astype(np.uint8)
 
@@ -505,6 +506,27 @@ class Dual_Dir_Dataset(Dataset):
                     "boxes": self.get_bounding_boxes(masks),
                     "labels": torch.ones(masks.shape[0], dtype=torch.int64)  # Set all IDs to 1 -> just one class type
                 }
+                
+            # FIXME for debugging
+            # fig, ax = plt.subplots(ncols=2, nrows=1, figsize=(20, 15), sharey=True)
+            # fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=None)
+            
+            # # plot original image
+            # print(image.shape)
+            # print(target["masks"].shape)
+            # ax[0].imshow(np.transpose(image.cpu().numpy(), (1, 2, 0)))
+            # ax[0].set_title("Original")
+            # ax[0].axis("off")
+
+            # # plot mask alone
+            # extract_and_visualize_mask(np.transpose(target["masks"].cpu().numpy(), (1, 2, 0)), image=None, ax=ax[1], visualize=True)
+            # ax[1].set_title("Prediction Mask")
+            # ax[1].axis("off")
+            
+            # plt.savefig("./DEBUGGING_PLOT.jpg")
+            # plt.clf()
+            
+            # FIXME debugging end
             
             return image, target, img_name
         else:
@@ -516,22 +538,58 @@ class Dual_Dir_Dataset(Dataset):
         boxes = []
         
         for mask in masks:
+            # object = np.unique(mask[mask != 0])
+            # if len(object) > 1:
             pos = np.where(mask == 1)
-            if len(pos[0]) == 0 or len(pos[1]) == 0:  # Check if there are no valid object pixels
-                continue  # Skip empty masks
-
             x_min = np.min(pos[1])
             x_max = np.max(pos[1])
             y_min = np.min(pos[0])
             y_max = np.max(pos[0])
-
-            # Ensure the bounding box has positive width and height
-            if x_max > x_min and y_max > y_min:
-                boxes.append([x_min, y_min, x_max, y_max])
-        
-        if len(boxes) == 0:
-            return torch.zeros((0, 4), dtype=torch.float32)  # Return an empty tensor if no valid boxes
+            
+            # update x values, if bounding box is too small
+            if x_min == x_max:
+                warning_str = "WARNING! Too small X in Bounding Box found!"
+                if x_max >= self.width:
+                    x_min -= 1
+                    warning_str += f" X_Min got udated to {x_min} from {x_min+1}"
+                else:
+                    x_max += 1
+                    warning_str += f" X_Max got udated to {x_max} from {x_max-1}"
+                log(self.log_path, warning_str, should_log=self.should_log, should_print=self.should_print)
+                    
+            # update y values, if bounding box is too small
+            if y_min == y_max:
+                warning_str = "WARNING! Too small Y in Bounding Box found!"
+                if y_max >= self.height:
+                    y_min -= 1
+                    warning_str += f" Y_Min got udated to {y_min} from {y_min+1}"
+                else:
+                    y_max += 1
+                    warning_str += f" Y_Max got udated to {y_max} from {y_max-1}"
+                log(self.log_path, warning_str, should_log=self.should_log, should_print=self.should_print)
+            
+            boxes.append([x_min, y_min, x_max, y_max])
         return torch.as_tensor(boxes, dtype=torch.float32)
+    
+        # boxes = []
+        
+        # for mask in masks:
+        #     pos = np.where(mask == 1)
+        #     if len(pos[0]) == 0 or len(pos[1]) == 0:  # Check if there are no valid object pixels
+        #         continue  # Skip empty masks
+
+        #     x_min = np.min(pos[1])
+        #     x_max = np.max(pos[1])
+        #     y_min = np.min(pos[0])
+        #     y_max = np.max(pos[0])
+
+        #     # Ensure the bounding box has positive width and height
+        #     if x_max > x_min and y_max > y_min:
+        #         boxes.append([x_min, y_min, x_max, y_max])
+        
+        # if len(boxes) == 0:
+        #     return torch.zeros((0, 4), dtype=torch.float32)  # Return an empty tensor if no valid boxes
+        # return torch.as_tensor(boxes, dtype=torch.float32)
     
 
 
@@ -551,6 +609,9 @@ class Dual_Dir_Dataset(Dataset):
             depth_not_found = []
             
         all_images_size = len(self.img_names)
+        
+        # for auto background detection
+        possible_bg_values = dict()
 
         for idx, cur_image in enumerate(self.img_names):
 
@@ -602,6 +663,19 @@ class Dual_Dir_Dataset(Dataset):
 
                     #         if rgb_shape != mask_shape:
                     #             mask_exists = False
+                
+                # get cur bg value (it also could be a large object)
+                if mask_exists:
+                    mask_img = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED) 
+                    if len(mask_img.shape) > 2:
+                        mask = self.rgb_mask_to_grey_mask(rgb_img=mask_img, verify=False)
+                        
+                    cur_bg = np.min(np.unique(mask_img))
+                    if cur_bg in possible_bg_values.keys():
+                        possible_bg_values[cur_bg] += 1
+                    else:
+                        possible_bg_values[cur_bg] = 1
+                
                 
                 if mask_exists:
                     masks_found += 1
@@ -668,6 +742,17 @@ class Dual_Dir_Dataset(Dataset):
         self.img_names = updated_images
         log(self.log_path, f"{'-'*32}\n", should_log=self.should_log, should_print=self.should_print)
 
+        # detect background
+        most_used_bg_value = 1
+        most_used_bg_amount = 0 
+        if len(possible_bg_values.items()) > 0:
+            
+            for key, value in possible_bg_values.items():
+                if value > most_used_bg_amount:
+                    most_used_bg_value = key
+                    most_used_bg_amount = value
+        self.background_value = most_used_bg_value
+        log(self.log_path, f"Auto background Detection: Found '{most_used_bg_value}' as Background value (used in {round((most_used_bg_amount / all_images_size)*100, 2)}% of images as lowest value)", should_log=self.should_log, should_print=self.should_print)
 
 
     def load_datanames(
@@ -1129,7 +1214,7 @@ def log(file_path, content, reset_logs=False, should_log=True, should_print=True
                 f.write("")
 
         with open(file_path, "a") as f:
-            f.write(f"’n{content}")
+            f.write(f"\n{content}")
 
     if should_print:
         print(content)
@@ -1177,7 +1262,7 @@ def update_output(cur_epoch,
     detail_output += ''.join([f' {key}: {value:>8.3f} |' for key, value in losses])
 
     iterations_in_cur_epoch = cur_iteration - cur_epoch*(data_size // batch_size)
-    cur_epoch_progress =  iterations_in_cur_epoch / (data_size // batch_size)
+    cur_epoch_progress =  iterations_in_cur_epoch / max(1, data_size // batch_size)
     cur_epoch_progress = min(int((cur_epoch_progress*100)//10), 10)
     cur_epoch_progress_ = max(10-cur_epoch_progress, 0)
 
@@ -1489,7 +1574,7 @@ def train(
     log(log_path, "", reset_logs=True, should_print=False)
 
     welcome_str = "xX Instance Segmentation with MASK-RCNN and PyTorch Xx"
-    white_spaces = int(max(0, len(welcome_str)//2 - len(name)//2))
+    white_spaces = int(max(0, len(welcome_str)//2 - (len(name)+6)//2))
     log(log_path, f"\n\n{welcome_str}\n{' '*white_spaces}-> {name} <-\n")
 
     # Dataset and DataLoader
