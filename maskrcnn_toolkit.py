@@ -75,7 +75,7 @@ class RUN_MODE(Enum):
 #############
 # Change these variables to your need
 
-MODE = RUN_MODE.TRAIN
+MODE = RUN_MODE.HYPERPARAMETER_TUNING
 
 
 
@@ -92,7 +92,7 @@ if MODE == RUN_MODE.TRAIN:
     WIDTH = 800   # 1920, 1024, 800, 640                # Image width for processing
     HEIGHT = 450  # 1080, 576, 450, 360                    # Image height for processing
 
-    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
+    DATA_MODE = DATA_LOADING_MODE.RANGE  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 100                       # Number of images for random mode
     START_IDX = 0                      # Starting index for range mode
     END_IDX = 99                       # Ending index for range mode
@@ -123,16 +123,16 @@ if MODE == RUN_MODE.TRAIN:
 if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
 
-    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
-    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
+    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb-prep'        # Directory for RGB images
+    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth-prep'  # Directory for depth-preprocessed images
     MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
     WIDTH = 800   # 1920, 1024, 800, 640                # Image width for processing
     HEIGHT = 450  # 1080, 576, 450, 360                    # Image height for processing
 
-    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
+    DATA_MODE = DATA_LOADING_MODE.RANGE  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 100                       # Number of images for random mode
     START_IDX = 0                      # Starting index for range mode
-    END_IDX = 99                       # Ending index for range mode
+    END_IDX = 199                       # Ending index for range mode
     IMAGE_NAME = "3xM_0_10_10.png"     # Specific image name for single mode
 
     NUM_WORKERS = 4                    # Number of workers for data loading
@@ -143,20 +143,20 @@ if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
 # INFERENCE #
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
-    WEIGHTS_PATH = "./weights/mask_rcnn_TEST.pth"  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_TEST_final.pth"  # Path to the model weights file
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
 
-    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
-    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
+    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb-prep'        # Directory for RGB images
+    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth-prep'  # Directory for depth-preprocessed images
     MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
-    WIDTH = 1920                       # Image width for processing
-    HEIGHT = 1080                      # Image height for processing
+    WIDTH = 800                       # Image width for processing
+    HEIGHT = 450                      # Image height for processing
 
-    DATA_MODE = DATA_LOADING_MODE.RANGE  # Mode for loading data -> All, Random, Range, Single Image
+    DATA_MODE = DATA_LOADING_MODE.SINGLE  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 10                       # Number of images for random mode
     START_IDX = 0                      # Starting index for range mode
     END_IDX = 9                       # Ending index for range mode
-    IMAGE_NAME = "3xM_0_10_10.jpg"     # Specific image name for single mode
+    IMAGE_NAME = "3xM_0_10_10.png"     # Specific image name for single mode
 
     NUM_WORKERS = 4                    # Number of workers for data loading
 
@@ -268,7 +268,7 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True):
         model (MaskRCNN): 
             The initialized Mask R-CNN model instance, ready for training or inference.
     """
-    backbone = resnet_fpn_backbone(backbone_name='resnet50', weights=ResNet50_Weights.IMAGENET1K_V1)
+    backbone = resnet_fpn_backbone(backbone_name='resnet50', weights=ResNet50_Weights.IMAGENET1K_V2) # ResNet50_Weights.IMAGENET1K_V1)
     model = MaskRCNN(backbone, num_classes=2)  # 2 Classes (Background + 1 Object)
     # odel = maskrcnn_resnet50_fpn(weights=MaskRCNN_ResNet50_FPN_Weights.DEFAULT, num_classes=2)    # ResNet50_Weights.DEFAULT
 
@@ -645,7 +645,7 @@ class Dual_Dir_Dataset(Dataset):
             log(self.log_path, f"\n> > > Depth-images < < <\nFound: {round((depth_found/len(self.img_names))*100, 2)}% ({depth_found}/{len(self.img_names)})", should_log=self.should_log, should_print=self.should_print)
                 
             if len(depth_not_found) > 0:
-                log("\n Not Found:", should_log=self.should_log, should_print=self.should_print)
+                log(self.log_path, "\n Not Found:", should_log=self.should_log, should_print=self.should_print)
                 
             for not_found in depth_not_found:
                 log(self.log_path, f"    -> {not_found}", should_log=self.should_log, should_print=self.should_print)
@@ -655,7 +655,7 @@ class Dual_Dir_Dataset(Dataset):
             log(self.log_path, f"\n> > > Masks < < <\nFound: {round((masks_found/len(self.img_names))*100, 2)}% ({masks_found}/{len(self.img_names)})", should_log=self.should_log, should_print=self.should_print)
                 
             if len(masks_not_found) > 0:
-                log("\n Not Found:", should_log=self.should_log, should_print=self.should_print)
+                log(self.log_path, "\n Not Found:", should_log=self.should_log, should_print=self.should_print)
                 
             for not_found in masks_not_found:
                 log(self.log_path, f"    -> {not_found}", should_log=self.should_log, should_print=self.should_print)
@@ -1260,7 +1260,7 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     # Init
     data_size = len(dataset)
     iteration = 0
-    max_iterations = data_size*num_epochs
+    max_iterations = int( (data_size/batch_size)*num_epochs )
     last_time = time.time()
     times = []
     loss_avgs = dict()
@@ -1365,8 +1365,8 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     # log & print info
     if should_log:
         update_output(
-            cur_epoch=num_epochs-1,
-            cur_iteration=iteration-1, 
+            cur_epoch=num_epochs,
+            cur_iteration=iteration, 
             max_iterations=max_iterations,
             duration=duration,
             eta_str=eta_str,
@@ -1377,7 +1377,7 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
             log_path=log_path
         )
 
-        log(log_path, f"\nCongratulations!!!! Your Model trained succefull!\n\n Your model waits here for you: '{f'./weights/{name}.pth'}'")
+        log(log_path, f"\nCongratulations!!!! Your Model trained succefull!\n\n Your model waits here for you: '{f'./weights/{name}.pth'}'", should_log=True, should_print=True)
 
     if return_objective.lower() == "loss":
         return total_loss
@@ -1592,18 +1592,20 @@ def hyperparameter_optimization(trial,
     now = datetime.now()
     print(f"    - Start next trial ({now.hour:02}:{now.minute:02} {now.day:02}.{now.month:02}.{now.year:04})")
     
+    
+    # Hyperparameters to optimize
+    learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-1, log=True)
+    momentum = trial.suggest_float('momentum', 0.7, 0.99)
+    decay = trial.suggest_float('decay', 1e-6, 1e-1, log=True)
+    batch_size = trial.suggest_int('batch_size', 10, 20) 
+    num_epochs = trial.suggest_int('num_epochs', 2, 50) 
+    
+    
     dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=Train_Augmentations(width=width, height=height), 
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
                                 data_mode=data_mode, use_mask=True, use_depth=use_depth, log_path=None,
                                 width=width, height=height, should_log=True, should_print=True)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
-    
-    # Hyperparameters to optimize
-    learning_rate = trial.suggest_loguniform('learning_rate', 1e-6, 1e-3)
-    momentum = trial.suggest_uniform('momentum', 0.7, 0.99)
-    decay = trial.suggest_loguniform('decay', 1e-6, 1e-1)
-    batch_size = trial.suggest_int('batch_size', 10, 20) 
-    num_epochs = trial.suggest_int('num_epochs', 2, 16) 
 
     # Call training function
     total_loss = train_loop(
@@ -1770,11 +1772,11 @@ def extract_and_visualize_mask(masks, image=None, ax=None, visualize=True, color
         if image is not None:
             color_image = color_image.astype(int) 
 
-            w, h, c = color_image.shape
+            h, w, c = color_image.shape
 
             if soft_join == False:
-                for cur_row_idx in range(w):
-                    for cur_col_idx in range(h):
+                for cur_row_idx in range(h):
+                    for cur_col_idx in range(w):
                         if color_image[cur_row_idx, cur_col_idx].sum() != 0:
                             image[cur_row_idx, cur_col_idx] = color_image[cur_row_idx, cur_col_idx]
                 color_image = image
@@ -1804,6 +1806,31 @@ def extract_and_visualize_mask(masks, image=None, ax=None, visualize=True, color
         return result_mask, color_image, color_map
 
     return result_mask
+
+
+
+def visualize_results(image, predictions, score_threshold=0.5):
+    image = np.copy(image)
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    # Ensure the image is in uint8 format
+    if image.dtype != np.uint8:
+        image = (image * 255).astype(np.uint8)
+    
+    pred_scores = predictions[0]['scores'].cpu().numpy()
+    pred_boxes = predictions[0]['boxes'].cpu().numpy()
+    pred_masks = predictions[0]['masks'].cpu().numpy()
+    for idx, score in enumerate(pred_scores):
+        if score > score_threshold:
+            # Draw bounding box
+            box = pred_boxes[idx].astype(int)
+            cv2.rectangle(image, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2)
+            # Draw Mask
+            mask = pred_masks[idx, 0] > 0.5  # Binarisiere die Maske
+            colored_mask = np.zeros_like(image, dtype=np.uint8)
+            colored_mask[mask] = [0, 0, 255]  # F�rbe die Maske rot
+            image = cv2.addWeighted(image, 1, colored_mask, 0.5, 0)
+    
+    return image
 
 
 
@@ -1944,6 +1971,7 @@ def calc_dice_coefficient(mask_1, mask_2):
     return dice_score
 
 
+
 def calc_f1_score(precision, recall):
     """
     Calculate the F1 Score based on precision and recall.
@@ -1960,6 +1988,7 @@ def calc_f1_score(precision, recall):
     if precision + recall == 0:
         return 0
     return 2 * (precision * recall) / (precision + recall)
+
 
 
 def calc_false_positive_rate(mask_1, mask_2):
@@ -1981,6 +2010,7 @@ def calc_false_positive_rate(mask_1, mask_2):
     return FP / (FP + TN) if FP + TN != 0 else 0
 
 
+
 def calc_false_negative_rate(mask_1, mask_2):
     """
     Calculate the False Negative Rate (FNR) between two masks.
@@ -1998,6 +2028,7 @@ def calc_false_negative_rate(mask_1, mask_2):
     TP = np.sum((mask_1 > 0) & (mask_2 > 0))
     
     return FN / (FN + TP) if FN + TP != 0 else 0
+
 
 
 def eval_pred(pred, ground_truth, name="instance_segmentation", should_print=True, should_save=True, save_path="./output"):
@@ -2155,7 +2186,8 @@ def inference(
                 name = data[1][0]
 
             # inference
-            result = model(image)[0]
+            all_results = model(image)
+            result = all_results[0]
             
             # move every data to cpu and bring to right format CHW to WHC
             image = image.cpu().numpy().squeeze(0)
@@ -2199,7 +2231,8 @@ def inference(
                 ax[1].axis("off")
 
                 # plot result
-                _, _, _ = extract_and_visualize_mask(result_masks, image=image, ax=ax[2], visualize=True, color_map=color_map)
+                # FIXME -> without colormap better? Maybe not int8?
+                _, _, _ = extract_and_visualize_mask(result_masks, image=image, ax=ax[2], visualize=True, color_map=None)    # color_map)
                 ax[2].set_title("Result")
                 ax[2].axis("off")
 
@@ -2213,7 +2246,14 @@ def inference(
                     plt.show()
                 else:
                     plt.clf()
-
+                    
+                # use other visualization
+                vis_img = visualize_results(image=image, predictions=all_results, score_threshold=0.5)
+                if save_visualization:
+                    cv2.imwrite(os.path.join(visualization_dir, f"{cleaned_name}_V2.jpg"), vis_img)
+                    
+                if show_visualization:
+                    plt.imshow(vis_img)
 
             # eval and plot ground truth comparisson
             if use_mask:
