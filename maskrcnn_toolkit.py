@@ -112,8 +112,17 @@ if MODE == RUN_MODE.TRAIN:
     LEARNING_RATE = 0.001              # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
     DECAY = 0.0005                     # Weight decay for regularization
-    BATCH_SIZE = 8                  # Batch size for training
+    BATCH_SIZE = 8                     # Batch size for training
     SHUFFLE = True                     # Shuffle the data during training
+    
+    # Decide which Data Augmentation should be applied
+    APPLY_RANDOM_FLIP = True
+    APPLY_RANDOM_ROTATION = True
+    APPLY_RANDOM_CROP = True
+    APPLY_RANDOM_BRIGHTNESS_CONTRAST = True
+    APPLY_RANDOM_GAUSSIAN_NOISE = True
+    APPLY_RANDOM_GAUSSIAN_BLUR = True
+    APPLY_RANDOM_SCALE = True
 
 
 
@@ -136,6 +145,15 @@ if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
     IMAGE_NAME = "3xM_0_10_10.png"     # Specific image name for single mode
 
     NUM_WORKERS = 4                    # Number of workers for data loading
+    
+    # Decide which Data Augmentation should be applied
+    APPLY_RANDOM_FLIP = True
+    APPLY_RANDOM_ROTATION = True
+    APPLY_RANDOM_CROP = True
+    APPLY_RANDOM_BRIGHTNESS_CONTRAST = True
+    APPLY_RANDOM_GAUSSIAN_NOISE = True
+    APPLY_RANDOM_GAUSSIAN_BLUR = True
+    APPLY_RANDOM_SCALE = True
     
 
 
@@ -168,12 +186,12 @@ if MODE == RUN_MODE.INFERENCE:
     SAVE_VISUALIZATION = True          # Save the visualizations to disk
     SHOW_VISUALIZATION = False          # Display the visualizations
     SAVE_EVALUATION = True             # Save the evaluation results
-    SHOW_EVALUATION = False
+    SHOW_EVALUATION = False             # Display the evaluation results
 
 
 
 # ---------------- #
-# SIMPLE_INFERENCE #
+# SIMPLE INFERENCE #
 # ---------------- #
 if MODE == RUN_MODE.SIMPLE_INFERENCE:
     WEIGHTS_PATH = "./weights/maskrcnn.pth"  # Path to the model weights file
@@ -945,7 +963,7 @@ class Random_Rotation:
 
 
 
-class RandomCrop:
+class Random_Crop:
     def __init__(self, min_crop_size, max_crop_size):
         # min_crop_size und max_crop_size sind Tupel (min_h, min_w), (max_h, max_w)
         self.min_crop_size = min_crop_size
@@ -1091,17 +1109,52 @@ class Resize:
 
 
 class Train_Augmentations:
-    def __init__(self, width, height):
-        self.augmentations = T.Compose([
-            Random_Flip(),
-            Random_Rotation(max_angle=30),
-            RandomCrop(min_crop_size=(100, 100), max_crop_size=(200, 200)),
-            Random_Brightness_Contrast(brightness_range=0.2, contrast_range=0.2),
-            Add_Gaussian_Noise(mean=0, std=0.01),
-            Random_Gaussian_Blur(kernel_size=5, sigma=(0.1, 2.0)),
-            Random_Scale(scale_range=(0.8, 1.2)),
-            Resize(width=width, height=height),
-        ])
+    def __init__(self, width, height, 
+                 apply_random_flip, apply_random_rotation,
+                 apply_random_crop, apply_random_brightness_contrast,
+                 apply_random_gaussian_noise, apply_random_gaussian_blur,
+                 apply_random_scale,
+                 log_path=None, should_log=True, should_print=True):
+        transformations = []
+        
+        info_str = "Using following Data Augmentations: "
+        
+        if apply_random_flip:
+            transformations += [Random_Flip()]
+            info_str += "Random Flip, "
+            
+        if apply_random_rotation:
+            transformations += [Random_Rotation(max_angle=30)]
+            info_str += "Random Rotation, "
+            
+        if apply_random_crop:
+            transformations += [Random_Crop(min_crop_size=(100, 100), max_crop_size=(200, 200))]
+            info_str += "Random Crop, "
+        
+        if apply_random_brightness_contrast:
+            transformations += [Random_Brightness_Contrast(brightness_range=0.2, contrast_range=0.2)]
+            info_str += "Random Brightness Contrast, "
+    
+        if apply_random_gaussian_noise:
+            transformations += [Add_Gaussian_Noise(mean=0, std=0.01)]
+            info_str += "Random Gaussian Noise, "
+        
+        if apply_random_gaussian_blur:
+            transformations += [Random_Gaussian_Blur(kernel_size=5, sigma=(0.1, 2.0))]
+            info_str += "Random Gaussian Blur, "
+        
+        if apply_random_scale:
+            transformations += [Random_Scale(scale_range=(0.8, 1.2))]
+            info_str += "Random Scale, "
+            
+        if len(transformations) <= 0:
+            log(log_path, "Using no Data Augmentation!", should_log=should_log, should_print=should_print)
+        else:
+            log(log_path, info_str[:-2], should_log=should_log, should_print=should_print)
+    
+        transformations += [Resize(width=width, height=height)]
+    
+        self.augmentations = T.Compose(transformations)
 
     def __call__(self, rgb_img, depth_img, mask_img):
         
@@ -1497,7 +1550,14 @@ def train(
         # experiment_id=12345,
         experiment_name='3xM Instance Segmentation',
         width=1920,
-        height=1080
+        height=1080,
+        apply_random_flip=True, 
+        apply_random_rotation=True,
+        apply_random_crop=True, 
+        apply_random_brightness_contrast=True,
+        apply_random_gaussian_noise=True, 
+        apply_random_gaussian_blur=True,
+        apply_random_scale=True
     ):
     """
     Trains a Mask R-CNN model for instance segmentation using PyTorch.
@@ -1550,6 +1610,20 @@ def train(
         Width of the input images for augmentation. Default is 1920.
     height : int, optional
         Height of the input images for augmentation. Default is 1080.
+    apply_random_flip : bool, optional
+        Should the data augmentation random flip should be applied. Defaut is True.
+    apply_random_rotation : bool, optional
+        Should the data augmentation random rotation should be applied. Defaut is True.
+    apply_random_crop : bool, optional
+        Should the data augmentation random crop should be applied. Defaut is True.
+    apply_random_brightness_contrast : bool, optional
+        Should the data augmentation random brightness contrast should be applied. Defaut is True.
+    apply_random_gaussian_noise : bool, optional
+        Should the data augmentation random gaussian noise should be applied. Defaut is True.
+    apply_random_gaussian_blur : bool, optional
+        Should the data augmentation random gaussian blur should be applied. Defaut is True.
+    apply_random_scale : bool, optional
+        Should the data augmentation random scale should be applied. Defaut is True.
 
     Returns:
     --------
@@ -1579,7 +1653,18 @@ def train(
 
     # Dataset and DataLoader
     log(log_path, "Loading the data...")
-    dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=Train_Augmentations(width=width, height=height), 
+    augmentation = Train_Augmentations(width=width, height=height,
+                                        apply_random_flip=apply_random_flip, 
+                                        apply_random_rotation=apply_random_rotation,
+                                        apply_random_crop=apply_random_crop, 
+                                        apply_random_brightness_contrast=apply_random_brightness_contrast,
+                                        apply_random_gaussian_noise=apply_random_gaussian_noise, 
+                                        apply_random_gaussian_blur=apply_random_gaussian_blur,
+                                        apply_random_scale=apply_random_scale,
+                                        log_path=log_path,
+                                        should_log=True,
+                                        should_print=True)
+    dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=augmentation, 
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
                                 data_mode=data_mode, use_mask=True, use_depth=use_depth, log_path=log_path,
                                 width=width, height=height, should_log=True, should_print=True)
@@ -1639,6 +1724,14 @@ def train(
                 mlflow.log_param("end_idx", end_idx)
 
                 mlflow.log_param("train_data_size", len(dataset))
+                
+                mlflow.log_param("apply_random_flip", apply_random_flip)
+                mlflow.log_param("apply_random_rotation", apply_random_rotation)
+                mlflow.log_param("apply_random_crop", apply_random_crop)
+                mlflow.log_param("apply_random_brightness_contrast", apply_random_brightness_contrast)
+                mlflow.log_param("apply_random_gaussian_noise", apply_random_gaussian_noise)
+                mlflow.log_param("apply_random_gaussian_blur", apply_random_gaussian_blur)
+                mlflow.log_param("apply_random_scale", apply_random_scale)
 
                 mlflow.pytorch.autolog()
 
@@ -1673,7 +1766,15 @@ def hyperparameter_optimization(trial,
                                 data_mode=DATA_LOADING_MODE.ALL,
                                 use_depth=False,
                                 width=1920,
-                                height=1080):
+                                height=1080,
+                                apply_random_flip=True, 
+                                apply_random_rotation=True,
+                                apply_random_crop=True, 
+                                apply_random_brightness_contrast=True,
+                                apply_random_gaussian_noise=True, 
+                                apply_random_gaussian_blur=True,
+                                apply_random_scale=True
+                            ):
     now = datetime.now()
     print(f"    - Start next trial ({now.hour:02}:{now.minute:02} {now.day:02}.{now.month:02}.{now.year:04})")
     
@@ -1686,7 +1787,18 @@ def hyperparameter_optimization(trial,
     num_epochs = trial.suggest_int('num_epochs', 2, 50) 
     
     
-    dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=Train_Augmentations(width=width, height=height), 
+    augmentation = Train_Augmentations(width=width, height=height,
+                                        apply_random_flip=apply_random_flip, 
+                                        apply_random_rotation=apply_random_rotation,
+                                        apply_random_crop=apply_random_crop, 
+                                        apply_random_brightness_contrast=apply_random_brightness_contrast,
+                                        apply_random_gaussian_noise=apply_random_gaussian_noise, 
+                                        apply_random_gaussian_blur=apply_random_gaussian_blur,
+                                        apply_random_scale=apply_random_scale,
+                                        log_path=None,
+                                        should_log=False,
+                                        should_print=False)
+    dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=augmentation, 
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
                                 data_mode=data_mode, use_mask=True, use_depth=use_depth, log_path=None,
                                 width=width, height=height, should_log=True, should_print=True)
@@ -2527,10 +2639,16 @@ if __name__ == "__main__":
                 use_depth=USE_DEPTH,
                 using_experiment_tracking=USING_EXPERIMENT_TRACKING,
                 create_new_experiment=CREATE_NEW_EXPERIMENT,    
-                # experiment_id=EXPERIMENT_ID,
                 experiment_name=EXPERIMENT_NAME,
                 width=WIDTH,
-                height=HEIGHT
+                height=HEIGHT,
+                apply_random_flip=APPLY_RANDOM_FLIP, 
+                apply_random_rotation=APPLY_RANDOM_ROTATION,
+                apply_random_crop=APPLY_RANDOM_CROP, 
+                apply_random_brightness_contrast=APPLY_RANDOM_BRIGHTNESS_CONTRAST,
+                apply_random_gaussian_noise=APPLY_RANDOM_GAUSSIAN_NOISE, 
+                apply_random_gaussian_blur=APPLY_RANDOM_GAUSSIAN_BLUR,
+                apply_random_scale=APPLY_RANDOM_SCALE
             )
     elif MODE == RUN_MODE.HYPERPARAMETER_TUNING:
         print("Start Hyperparameter optimization...")
@@ -2548,8 +2666,15 @@ if __name__ == "__main__":
                                             data_mode=DATA_MODE,
                                             use_depth=USE_DEPTH,
                                             width=WIDTH,
-                                            height=HEIGHT)
-        
+                                            height=HEIGHT,
+                                            apply_random_flip=APPLY_RANDOM_FLIP, 
+                                            apply_random_rotation=APPLY_RANDOM_ROTATION,
+                                            apply_random_crop=APPLY_RANDOM_CROP, 
+                                            apply_random_brightness_contrast=APPLY_RANDOM_BRIGHTNESS_CONTRAST,
+                                            apply_random_gaussian_noise=APPLY_RANDOM_GAUSSIAN_NOISE, 
+                                            apply_random_gaussian_blur=APPLY_RANDOM_GAUSSIAN_BLUR,
+                                            apply_random_scale=APPLY_RANDOM_SCALE)
+                                    
         study = optuna.create_study(direction='minimize')
         study.optimize(partial_optimization_func, n_trials=20) 
 
