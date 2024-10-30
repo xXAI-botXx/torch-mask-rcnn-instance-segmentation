@@ -208,35 +208,6 @@ SAVE_EVALUATION = True                          # Save the evaluation results
 SHOW_EVALUATION = False                         # Display the evaluation results
 ```
 
-Alternatively you can use a basic and very simple inference. Here you will give an image and the inference will only make the inference + improving the results and will return the results.
-Set MODE to SIMPLE_INFERENCE And go to the
-
-```python
-# ---------------- #
-# SIMPLE INFERENCE #
-# ---------------- #
-```
-
-section.
-
-With following parameters:
-
-```python
-WEIGHTS_PATH = "./weights/maskrcnn.pth"         # Path to the model weights file
-USE_DEPTH = False                               # Whether to include depth information -> as rgb and depth on green channel
-
-IMG_DIR ='.../3xM_Dataset_1_1_TEST/'            # Directory for RGB images
-DEPTH_DIR = '.../3xM_Dataset_1_1_TEST/depth'    # Directory for depth-preprocessed images
-WIDTH = 1920                                    # Image width for processing
-HEIGHT = 1080                                   # Image height for processing
-
-IMAGE_NAME = "3xM_0_10_10.png"                  # Specific image name 
-
-OUTPUT_DIR = "./output"                         # Directory to save output files
-USE_MASK = True                                 # Whether to use masks during inference
-OUTPUT_TYPE = "png"                             # Output format: 'numpy-array' or 'png'
-SHOULD_SAVE = True                              # Decides whether to save the mask or not -> mask will be returned
-```
 
 
 ---

@@ -63,7 +63,7 @@ class RUN_MODE(Enum):
     TRAIN = "train"
     HYPERPARAMETER_TUNING = "hyperparameter_tuning"
     INFERENCE = "inference"
-    SIMPLE_INFERENCE = "simple_inference"
+    # SIMPLE_INFERENCE = "simple_inference"
 
 
 
@@ -84,7 +84,7 @@ MODE = RUN_MODE.TRAIN
 # -------- #
 if MODE == RUN_MODE.TRAIN:
     WEIGHTS_PATH = None  # Path to the model weights file
-    USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
+    USE_DEPTH = True                   # Whether to include depth information -> as rgb and depth on green channel
 
     IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
     DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
@@ -101,7 +101,7 @@ if MODE == RUN_MODE.TRAIN:
     NUM_WORKERS = 4                    # Number of workers for data loading
 
     MULTIPLE_DATASETS = None           # Path to folder for training multiple models
-    NAME = 'mask_rcnn_TEST'                 # Name of the model to use
+    NAME = 'mask_rcnn_Depth_TEST'                 # Name of the model to use
 
     USING_EXPERIMENT_TRACKING = True   # Enable experiment tracking
     CREATE_NEW_EXPERIMENT = False       # Whether to create a new experiment run
@@ -109,7 +109,7 @@ if MODE == RUN_MODE.TRAIN:
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
     NUM_EPOCHS = 20                    # Number of training epochs
-    LEARNING_RATE = 0.001              # Learning rate for the optimizer
+    LEARNING_RATE = 0.0005             # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
     DECAY = 0.0005                     # Weight decay for regularization
     BATCH_SIZE = 8                     # Batch size for training
@@ -132,19 +132,22 @@ if MODE == RUN_MODE.TRAIN:
 if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
 
-    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb-prep'        # Directory for RGB images
-    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth-prep'  # Directory for depth-preprocessed images
+    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
+    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
     MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
-    WIDTH = 800   # 1920, 1024, 800, 640                # Image width for processing
-    HEIGHT = 450  # 1080, 576, 450, 360                    # Image height for processing
+    WIDTH = 1920   # 1920, 1024, 800, 640                # Image width for processing
+    HEIGHT = 1080  # 1080, 576, 450, 360                    # Image height for processing
 
-    DATA_MODE = DATA_LOADING_MODE.RANGE  # Mode for loading data -> All, Random, Range, Single Image
+    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 100                       # Number of images for random mode
     START_IDX = 0                      # Starting index for range mode
-    END_IDX = 199                       # Ending index for range mode
+    END_IDX = 499                       # Ending index for range mode
     IMAGE_NAME = "3xM_0_10_10.png"     # Specific image name for single mode
 
     NUM_WORKERS = 4                    # Number of workers for data loading
+    BATCH_SIZE = 5
+    MOMENTUM = 0.9                     # Momentum for the optimizer
+    DECAY = 0.0005                     # Weight decay for regularization
     
     # Decide which Data Augmentation should be applied
     APPLY_RANDOM_FLIP = True
@@ -161,11 +164,12 @@ if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
 # INFERENCE #
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
-    WEIGHTS_PATH = "./weights/mask_rcnn_TEST_final.pth"  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_TEST.pth"  # Path to the model weights file
+    MASK_SCORE_THRESHOLD = 0.9
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
 
-    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb-prep'        # Directory for RGB images
-    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth-prep'  # Directory for depth-preprocessed images
+    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
+    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
     MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
     WIDTH = 800                       # Image width for processing
     HEIGHT = 450                      # Image height for processing
@@ -187,28 +191,6 @@ if MODE == RUN_MODE.INFERENCE:
     SHOW_VISUALIZATION = False          # Display the visualizations
     SAVE_EVALUATION = True             # Save the evaluation results
     SHOW_EVALUATION = False             # Display the evaluation results
-
-
-
-# ---------------- #
-# SIMPLE INFERENCE #
-# ---------------- #
-if MODE == RUN_MODE.SIMPLE_INFERENCE:
-    WEIGHTS_PATH = "./weights/maskrcnn.pth"  # Path to the model weights file
-    USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
-
-    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/'        # Directory for RGB images
-    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth'  # Directory for depth-preprocessed images
-    WIDTH = 1920                       # Image width for processing
-    HEIGHT = 1080                      # Image height for processing
-
-    IMAGE_NAME = "3xM_0_10_10.png"     # Specific image name 
-
-    OUTPUT_DIR = "./output"            # Directory to save output files
-    USE_MASK = True                    # Whether to use masks during inference
-    OUTPUT_TYPE = "png"                # Output format: 'numpy-array' or 'png'
-    SHOULD_SAVE = True                 # Decides whether to save the mask or not -> mask will be returned
-
 
 
 
@@ -1424,24 +1406,25 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                 for key, value in loss_dict.items():
                     if experiment_tracking:
                         # make experiment tracking
-                        mlflow.log_metric(key, value, step=iteration)
+                        mlflow.log_metric(key, value.cpu().detach().numpy(), step=iteration)
 
                         # make tensorboard logging
-                        writer.add_scalar(key, value, iteration)
+                        writer.add_scalar(key, value.cpu().detach().numpy(), iteration)
 
                     if key in loss_avgs.keys():
                         loss_avgs[key] += [value.cpu().detach().numpy()]
                     else:
                         loss_avgs[key] = [value.cpu().detach().numpy()]
 
+                cur_total_loss = sum([value.cpu().detach().numpy() for value in loss_dict.values()])
+                
                 if experiment_tracking:
-                    total_loss = sum([value.cpu() for value in loss_dict.values()])
 
                     # make experiment tracking
-                    mlflow.log_metric("total loss", total_loss, step=iteration)
+                    mlflow.log_metric("total loss", cur_total_loss, step=iteration)
 
                     # make tensorboard logging
-                    writer.add_scalar("total loss", total_loss, iteration)
+                    writer.add_scalar("total loss", cur_total_loss, iteration)
 
                 # log time duration
                 cur_time = time.time()
@@ -1518,7 +1501,7 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
         log(log_path, f"\nCongratulations!!!! Your Model trained succefull!\n\n Your model waits here for you: '{f'./weights/{name}.pth'}'", should_log=True, should_print=True)
 
     if return_objective.lower() == "loss":
-        return total_loss
+        return cur_total_loss
     elif return_objective.lower() == "model":
         return model
     else:
@@ -1759,6 +1742,9 @@ def hyperparameter_optimization(trial,
                                 depth_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep',
                                 mask_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/mask-prep',
                                 num_workers=4,
+                                batch_size=1,
+                                momentum=0.9,
+                                decay=0.0005,
                                 amount=100,     # for random mode
                                 start_idx=0,    # for range mode
                                 end_idx=99,     # for range mode
@@ -1780,11 +1766,10 @@ def hyperparameter_optimization(trial,
     
     
     # Hyperparameters to optimize
-    learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-1, log=True)
-    momentum = trial.suggest_float('momentum', 0.7, 0.99)
-    decay = trial.suggest_float('decay', 1e-6, 1e-1, log=True)
-    batch_size = trial.suggest_int('batch_size', 10, 20) 
-    num_epochs = trial.suggest_int('num_epochs', 2, 50) 
+    learning_rate = trial.suggest_float('learning_rate', 1e-7, 1e-3, log=True)
+    # momentum = trial.suggest_float('momentum', 0.7, 0.99)
+    # decay = trial.suggest_float('decay', 1e-5, 1e-1, log=True)
+    num_epochs = trial.suggest_int('num_epochs', 2, 20) 
     
     
     augmentation = Train_Augmentations(width=width, height=height,
@@ -1822,6 +1807,12 @@ def hyperparameter_optimization(trial,
                     should_save=False,
                     return_objective="loss"
                 )
+    
+    if total_loss is None:
+        total_loss = 7777.777
+    else:
+        
+        total_loss = round(total_loss, 5)
 
     return total_loss
 
@@ -1979,13 +1970,13 @@ def extract_and_visualize_mask(masks, image=None, ax=None, visualize=True, color
                 color_image = image
             else:
                 # remove black baclground
-                for cur_row_idx in range(w):
-                    for cur_col_idx in range(h):
+                for cur_row_idx in range(h):
+                    for cur_col_idx in range(w):
                         if color_image[cur_row_idx, cur_col_idx].sum() == 0:
                             color_image[cur_row_idx, cur_col_idx] = image[cur_row_idx, cur_col_idx]
 
                 # Set the transparency levels (alpha and beta)
-                alpha = 0.5  # transparency of 1. image
+                alpha = 0.7  # transparency of 1. image
                 beta = 1 - alpha  # transparency of 2. image
 
                 # Blend the images
@@ -2294,7 +2285,8 @@ def inference(
         show_visualization=False,
         show_evaluation=False,
         width=1920,
-        height=1080
+        height=1080,
+        mask_threshold=0.9
     ):
     """
     Perform inference using a Mask R-CNN model with the provided dataset and parameters, while also
@@ -2395,6 +2387,7 @@ def inference(
                 masks_gt = np.transpose(masks_gt, (1, 2, 0))
             
             result_masks = result['masks'].cpu().squeeze(1).numpy()
+            result_masks = (result_masks > mask_threshold).astype(np.uint8)
             result_masks = np.transpose(result_masks, (1, 2, 0))
             
             # save mask
@@ -2428,8 +2421,7 @@ def inference(
                 ax[1].axis("off")
 
                 # plot result
-                # FIXME -> without colormap better? Maybe not int8?
-                _, _, _ = extract_and_visualize_mask(result_masks, image=image, ax=ax[2], visualize=True, color_map=None)    # color_map)
+                _, _, _ = extract_and_visualize_mask(result_masks, image=image, ax=ax[2], visualize=True, color_map=color_map)    # color_map)
                 ax[2].set_title("Result")
                 ax[2].axis("off")
 
@@ -2486,110 +2478,6 @@ def inference(
                         
             idx += 1
 
-def simple_inference(   
-        weights_path,
-        img_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb',
-        depth_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep',
-        image_name="3xM_0_10_10.png",
-        use_depth=False,
-        should_save=True,
-        output_type="png",
-        output_dir="./output",
-        width=1920,
-        height=1080
-    ):
-    """
-    Perform simple single inference using a Mask R-CNN model with the provided dataset and parameters, 
-    without visualization and evaluation of the results.
-
-    Args:
-    -----
-        weights_path (str): Path to the pretrained Mask R-CNN model weights.
-        img_dir (str): Directory containing RGB images for inference.
-        depth_dir (str): Directory containing depth-prepared images (if applicable).
-        image_name (str): Image name.
-        use_depth (bool): Whether to include depth information for the model inference.
-        should_save (bool): Decides if the result masks should get saved or not.
-        output_type (str): Format to save the inferred masks, options are ['jpg', 'png', 'npy'].
-        output_dir (str): Directory to save the inference results.
-        width (int): Image width for resizing during inference.
-        height (int): Image height for resizing during inference.
-
-    Returns:
-    --------
-        np.Array: This function outputs the masks from one inference and saves results.
-    """
-
-    print(f"\n\nxX Mask-RCNN Simple Inference Xx")
-
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    print(f"Using {device}")
-
-    model_name = ".".join(weights_path.split("/")[-1].split(".")[:-1])
-
-    with torch.no_grad():
-        # create model
-        model = load_maskrcnn(weights_path=weights_path, use_4_channels=use_depth, pretrained=False)
-        model.eval()
-        model = model.to(device)
-
-        # load data
-        img_path = os.path.join(img_dir, image_name)
-        depth_path = os.path.join(depth_dir, image_name)
-
-        # Load the RGB Image, Depth Image and the Gray Mask (and make sure that the size is right)
-        image = cv2.imread(img_path)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        # image = resize_with_padding(image, target_h=self.height, target_w=self.width, method=cv2.INTER_LINEAR)
-        
-        if use_depth:
-            depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
-            _, depth, _, _ =  cv2.split(depth)
-
-        # Apply transformations
-        transform = Inference_Augmentations(width=width, height=height)
-        if use_depth:
-            image, depth, _ = transform(image, depth, None)
-        else:
-            image, _, _ = transform(image, None, None)
-
-        # Add Depth to Image as 4th Channel
-        if use_depth:
-            # Ensure depth is a 2D array
-            if depth.ndim == 2:
-                depth = np.expand_dims(depth, axis=-1)  # Add an extra dimension for depth channel
-            
-            # Concatenate along the channel axis to form an RGBA image (4th channel is depth)
-            image = np.concatenate((image, depth), axis=-1)
-        
-        # image to tensor
-        image = T.ToTensor()(image)
-
-        # send to device + add batch hull
-        image = image.to(device).unsqueeze(0)
-
-        # inference
-        result = model(image)
-        
-        result_masks = result['masks'].cpu().squeeze(1).numpy()
-        result_masks = np.transpose(result_masks, (1, 2, 0))
-        
-        # save mask
-        if should_save:
-            os.makedirs(output_dir, exist_ok=True)
-
-            # result = {key: value.cpu() for key, value in result.items()}
-            cleaned_name = model_name + "_" + ".".join(image_name.split(".")[:-1])
-
-            extracted_mask = extract_and_visualize_mask(result_masks, image=None, ax=None, visualize=False, color_map=None, soft_join=False)
-            if output_type in ["numpy", "npy"]:
-                np.save(os.path.join(output_dir, f'{cleaned_name}.npy'), extracted_mask)
-            else:
-                # recommended
-                cv2.imwrite(os.path.join(output_dir, f'{cleaned_name}.png'), extracted_mask)
-
-
-        return extracted_mask
 
 
 
@@ -2659,6 +2547,9 @@ if __name__ == "__main__":
                                             depth_dir=DEPTH_DIR,
                                             mask_dir=MASK_DIR,
                                             num_workers=NUM_WORKERS,
+                                            batch_size=BATCH_SIZE,
+                                            momentum=MOMENTUM,
+                                            decay=DECAY,
                                             amount=AMOUNT,     # for random mode
                                             start_idx=START_IDX,    # for range mode
                                             end_idx=END_IDX,     # for range mode
@@ -2709,21 +2600,22 @@ if __name__ == "__main__":
                 show_visualization=SHOW_VISUALIZATION,
                 show_evaluation=SHOW_EVALUATION,
                 width=WIDTH,
-                height=HEIGHT
+                height=HEIGHT,
+                mask_threshold=MASK_SCORE_THRESHOLD
         )
-    elif MODE == RUN_MODE.SIMPLE_INFERENCE:
-        simple_inference(
-            weights_path=WEIGHTS_PATH,
-            img_dir=IMG_DIR,
-            depth_dir=DEPTH_DIR,
-            image_name=IMAGE_NAME,
-            use_depth=USE_DEPTH,
-            should_save=SHOULD_SAVE,
-            output_type=OUTPUT_TYPE,
-            output_dir=OUTPUT_DIR,
-            width=WIDTH,
-            height=HEIGHT
-        )
+    # elif MODE == RUN_MODE.SIMPLE_INFERENCE:
+    #     simple_inference(
+    #         weights_path=WEIGHTS_PATH,
+    #         img_dir=IMG_DIR,
+    #         depth_dir=DEPTH_DIR,
+    #         image_name=IMAGE_NAME,
+    #         use_depth=USE_DEPTH,
+    #         should_save=SHOULD_SAVE,
+    #         output_type=OUTPUT_TYPE,
+    #         output_dir=OUTPUT_DIR,
+    #         width=WIDTH,
+    #         height=HEIGHT
+    #     )
     
     
 
