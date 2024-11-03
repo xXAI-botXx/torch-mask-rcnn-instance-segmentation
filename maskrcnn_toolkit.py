@@ -206,6 +206,7 @@ from datetime import datetime, timedelta
 import time
 from IPython.display import clear_output
 from functools import partial
+import statistics
 
 # image
 import random
@@ -2218,6 +2219,25 @@ def calc_false_negative_rate(mask_1, mask_2):
     return FN / (FN + TP) if FN + TP != 0 else 0
 
 
+def plot_and_save_evaluation(pixel_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name="instance_segmentation", should_print=True, should_save=True, save_path="./output"):
+    eval_str = "\nEvaluation:\n"
+    eval_str += f"    - Pixel Accuracy = {round(pixel_acc * 100, 2)}%\n"
+    eval_str += f"    - IoU = {iou}\n"
+    eval_str += f"    - Precision = {round(precision * 100, 2)}%\n        -> How many positive predicted are really positive\n        -> Only BG/FG\n"
+    eval_str += f"    - Recall = {round(recall * 100, 2)}%\n        -> How many positive were found\n        -> Only BG/FG\n"
+    eval_str += f"    - F1 Score = {round(f1_score * 100, 2)}%\n        -> Harmonic mean of Precision and Recall\n"
+    eval_str += f"    - Dice Coefficient = {round(dice * 100, 2)}%\n        -> Measure of overlap between predicted and actual masks\n"
+    eval_str += f"    - False Positive Rate (FPR) = {round(fpr * 100, 2)}%\n"
+    eval_str += f"    - False Negative Rate (FNR) = {round(fnr * 100, 2)}%\n"
+
+    if should_print:
+        print(eval_str)
+
+    if should_save:
+        path = os.path.join(save_path, f"{name}_eval.txt")
+        with open(path, "w") as eval_file:
+            eval_file.write(eval_str)
+
 
 def eval_pred(pred, ground_truth, name="instance_segmentation", should_print=True, should_save=True, save_path="./output"):
     """
@@ -2241,25 +2261,49 @@ def eval_pred(pred, ground_truth, name="instance_segmentation", should_print=Tru
     fpr = calc_false_positive_rate(pred, ground_truth)
     fnr = calc_false_negative_rate(pred, ground_truth)
 
-    eval_str = "\nEvaluation:\n"
-    eval_str += f"    - Pixel Accuracy = {round(pixel_acc * 100, 2)}%\n"
-    eval_str += f"    - IoU = {iou}\n"
-    eval_str += f"    - Precision = {round(precision * 100, 2)}%\n        -> How many positive predicted are really positive\n        -> Only BG/FG\n"
-    eval_str += f"    - Recall = {round(recall * 100, 2)}%\n        -> How many positive were found\n        -> Only BG/FG\n"
-    eval_str += f"    - F1 Score = {round(f1_score * 100, 2)}%\n        -> Harmonic mean of Precision and Recall\n"
-    eval_str += f"    - Dice Coefficient = {round(dice * 100, 2)}%\n        -> Measure of overlap between predicted and actual masks\n"
-    eval_str += f"    - False Positive Rate (FPR) = {round(fpr * 100, 2)}%\n"
-    eval_str += f"    - False Negative Rate (FNR) = {round(fnr * 100, 2)}%\n"
-
-    if should_print:
-        print(eval_str)
-
-    if should_save:
-        path = os.path.join(save_path, f"{name}_eval.txt")
-        with open(path, "w") as eval_file:
-            eval_file.write(eval_str)
+    plot_and_save_evaluation(pixel_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name=name, should_print=should_print, should_save=should_save, save_path=save_path)
 
     return pixel_acc, iou, precision, recall, f1_score, dice, fpr, fnr
+
+
+
+def update_evaluation_summary(sum_dict, results):
+    pixel_acc, iou, precision, recall, f1_score, dice, fpr, fnr = results
+
+    eval_key_value = [
+        ["pixel accuracy", pixel_acc],
+        ["intersection over union", iou],
+        ["precision", precision], 
+        ["recall", recall], 
+        ["f1 score", f1_score], 
+        ["dice", dice], 
+        ["false positive rate", fpr], 
+        ["false negative rate", fnr]
+    ]
+
+    for key, value in eval_key_value:
+        if key in sum_dict.keys():
+            sum_dict[key] += [value]
+        else:
+            sum_dict[key] = [value]
+
+    return sum_dict
+
+
+
+def save_and_show_evaluation_summary(sum_dict, name="instance_segmentation", should_print=True, should_save=True, save_path="./output"):
+
+    pixel_acc = statistics.mean(sum_dict["pixel accuracy"])
+    iou = statistics.mean(sum_dict["intersection over union"])
+    precision = statistics.mean(sum_dict["precision"])
+    recall = statistics.mean(sum_dict["recall"])
+    f1_score = statistics.mean(sum_dict["f1 score"])
+    dice = statistics.mean(sum_dict["dice"])
+    fpr = statistics.mean(sum_dict["false positive rate"])
+    fnr = statistics.mean(sum_dict["false negative rate"])
+
+    plot_and_save_evaluation(pixel_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name=name, should_print=should_print, should_save=should_save, save_path=save_path)
+
 
 
 
@@ -2342,6 +2386,8 @@ def inference(
     all_images_size = len(data_loader)
 
     model_name = ".".join(weights_path.split("/")[-1].split(".")[:-1])
+
+    eval_sum_dict = dict()
 
     with torch.no_grad():
         # create model
@@ -2450,7 +2496,8 @@ def inference(
                     print("Plot result in comparison to ground truth and evaluate with ground truth*")
                 # mask = cv2.resize(mask, extracted_mask.shape[1], extracted_mask.shape[0])
                 masks_gt = extract_and_visualize_mask(masks_gt, image=None, ax=None, visualize=False, color_map=None, soft_join=False)
-                eval_pred(extracted_mask, masks_gt, name=cleaned_name, should_print=show_evaluation, should_save=save_evaluation, save_path=output_dir)
+                eval_results = eval_pred(extracted_mask, masks_gt, name=cleaned_name, should_print=show_evaluation, should_save=save_evaluation, save_path=output_dir)
+                eval_sum_dict = update_evaluation_summary(sum_dict=eval_sum_dict, results=eval_results)
 
                 if should_visualize:
                     fig, ax = plt.subplots(ncols=2, nrows=1, figsize=(20, 15), sharey=True)
@@ -2477,6 +2524,9 @@ def inference(
                         plt.clf()
                         
             idx += 1
+
+        if use_mask:
+            save_and_show_evaluation_summary(eval_sum_dict, name="Complete-Evaluation", should_print=show_evaluation, should_save=save_evaluation, save_path=output_dir)
 
 
 
