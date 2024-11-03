@@ -88,7 +88,7 @@ if MODE == RUN_MODE.TRAIN:
 
     IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
     DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
-    MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
+    MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask'    # Directory for mask-preprocessed images
     WIDTH = 1920   # 1920, 1024, 800, 640                # Image width for processing
     HEIGHT = 1080  # 1080, 576, 450, 360                    # Image height for processing
 
@@ -100,19 +100,19 @@ if MODE == RUN_MODE.TRAIN:
 
     NUM_WORKERS = 4                    # Number of workers for data loading
 
-    MULTIPLE_DATASETS = None           # Path to folder for training multiple models
-    NAME = 'mask_rcnn_Depth_TEST'                 # Name of the model to use
+    MULTIPLE_DATASETS = "/mnt/morespace/3xM"           # Path to folder for training multiple models
+    SKIP_DATASETS = ["3xM_Test_Datasets"]
+    NAME = 'mask_rcnn_rgbd'                 # Name of the model to use
 
     USING_EXPERIMENT_TRACKING = True   # Enable experiment tracking
-    CREATE_NEW_EXPERIMENT = False       # Whether to create a new experiment run
-    # EXPERIMENT_ID = 12345            # Optional ID for the experiment
+    CREATE_NEW_EXPERIMENT = True       # Whether to create a new experiment run
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
-    NUM_EPOCHS = 20                    # Number of training epochs
+    NUM_EPOCHS = 15                    # Number of training epochs
     LEARNING_RATE = 0.0005             # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
     DECAY = 0.0005                     # Weight decay for regularization
-    BATCH_SIZE = 8                     # Batch size for training
+    BATCH_SIZE = 5                    # Batch size for training
     SHUFFLE = True                     # Shuffle the data during training
     
     # Decide which Data Augmentation should be applied
@@ -224,6 +224,7 @@ from torchvision.models.detection import MaskRCNN
 # from torchvision.models.detection import maskrcnn_resnet50_fpn
 # from torchvision.models.detection import MaskRCNN_ResNet50_FPN_Weights
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
+from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from torchvision.models import ResNet50_Weights
 # from torchvision.transforms import functional as F
 import torchvision.transforms as T
@@ -241,7 +242,9 @@ import optuna
 # general #
 ###########
 
-def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True):
+def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
+                  image_mean=[0.485, 0.456, 0.406, 0.5], image_std=[0.229, 0.224, 0.225, 0.5],    # from ImageNet
+                  min_size=1080, max_size=1920):
     """
     Load a Mask R-CNN model with a specified backbone and optional modifications.
 
@@ -292,6 +295,10 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True):
 
         
         model.backbone.body.conv1 = new_conv1  # Replace the old Conv1 Layer with the new one
+        
+        # Modify the transform to handle 4 channels
+        #       - Replace the transform in the model with a custom one
+        model.transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
         
     if weights_path:
         model.load_state_dict(state_dict=torch.load(weights_path, weights_only=True)) 
@@ -2534,13 +2541,19 @@ def inference(
 
 
 if __name__ == "__main__":
-    model_path = "./weights/mask_rcnn.pth" 
-    image_path = "/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb/3xM_4_1_1.png"  
-    output_path = "./output/3xM_4_1_1.png" 
 
     if MODE == RUN_MODE.TRAIN:
         if MULTIPLE_DATASETS is not None:
-            datasets = os.listdir(MULTIPLE_DATASETS)
+            datasets = []
+            for cur_dataset in os.listdir(MULTIPLE_DATASETS):
+                if cur_dataset not in SKIP_DATASETS:
+                    img_path = os.path.join(MULTIPLE_DATASETS, cur_dataset, "rgb")
+                    mask_path = os.path.join(MULTIPLE_DATASETS, cur_dataset, "mask")
+                    depth_path = os.path.join(MULTIPLE_DATASETS, cur_dataset, "depth")
+                    if os.path.exists(img_path) and os.path.isdir(img_path) and \
+                        os.path.exists(mask_path) and os.path.isdir(mask_path) and \
+                        (os.path.exists(depth_path) and os.path.isdir(depth_path) or not USE_DEPTH):
+                        datasets += [cur_dataset]
         else:
             datasets = [1]
 
@@ -2548,8 +2561,8 @@ if __name__ == "__main__":
             if MULTIPLE_DATASETS is not None:
                 name = f"{NAME}_{cur_dataset}"
                 img_path = os.path.join(MULTIPLE_DATASETS, cur_dataset, "rgb")
-                mask_path = os.path.join(MULTIPLE_DATASETS, cur_dataset, "mask-prep")
-                depth_path = os.path.join(MULTIPLE_DATASETS, cur_dataset, "depth-prep")
+                mask_path = os.path.join(MULTIPLE_DATASETS, cur_dataset, "mask")
+                depth_path = os.path.join(MULTIPLE_DATASETS, cur_dataset, "depth")
             else:
                 name = NAME
                 img_path = IMG_DIR
