@@ -86,9 +86,9 @@ if MODE == RUN_MODE.TRAIN:
     WEIGHTS_PATH = None  # Path to the model weights file
     USE_DEPTH = True                   # Whether to include depth information -> as rgb and depth on green channel
 
-    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
-    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
-    MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask'    # Directory for mask-preprocessed images
+    IMG_DIR ='/mnt/morespace/3xM/3xM_Dataset_80_80/rgb'        # Directory for RGB images
+    DEPTH_DIR = '/mnt/morespace/3xM/3xM_Dataset_80_80/depth'  # Directory for depth-preprocessed images
+    MASK_DIR = '/mnt/morespace/3xM/3xM_Dataset_80_80/mask'    # Directory for mask-preprocessed images
     WIDTH = 1920   # 1920, 1024, 800, 640                # Image width for processing
     HEIGHT = 1080  # 1080, 576, 450, 360                    # Image height for processing
 
@@ -109,10 +109,10 @@ if MODE == RUN_MODE.TRAIN:
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
     NUM_EPOCHS = 15                    # Number of training epochs
-    LEARNING_RATE = 0.0005             # Learning rate for the optimizer
+    LEARNING_RATE = 0.005             # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
     DECAY = 0.0005                     # Weight decay for regularization
-    BATCH_SIZE = 5                    # Batch size for training
+    BATCH_SIZE = 100                    # Batch size for training
     SHUFFLE = True                     # Shuffle the data during training
     
     # Decide which Data Augmentation should be applied
@@ -123,6 +123,8 @@ if MODE == RUN_MODE.TRAIN:
     APPLY_RANDOM_GAUSSIAN_NOISE = True
     APPLY_RANDOM_GAUSSIAN_BLUR = True
     APPLY_RANDOM_SCALE = True
+    
+    MASK_SCORE_THRESHOLD = 0.9
 
 
 
@@ -132,9 +134,9 @@ if MODE == RUN_MODE.TRAIN:
 if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
 
-    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
-    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
-    MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
+    IMG_DIR ='/mnt/morespace/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
+    DEPTH_DIR = '/mnt/morespace/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
+    MASK_DIR = '/mnt/morespace/3xM/3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
     WIDTH = 1920   # 1920, 1024, 800, 640                # Image width for processing
     HEIGHT = 1080  # 1080, 576, 450, 360                    # Image height for processing
 
@@ -158,19 +160,21 @@ if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
     APPLY_RANDOM_GAUSSIAN_BLUR = True
     APPLY_RANDOM_SCALE = True
     
+    MASK_SCORE_THRESHOLD = 0.9
+    
 
 
 # --------- #
 # INFERENCE #
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
-    WEIGHTS_PATH = "./weights/mask_rcnn_TEST.pth"  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_rgbd_3xM_Dataset_80_80.pth"  # Path to the model weights file
     MASK_SCORE_THRESHOLD = 0.9
-    USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
+    USE_DEPTH = True                   # Whether to include depth information -> as rgb and depth on green channel
 
-    IMG_DIR ='/home/local-admin/data/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
-    DEPTH_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
-    MASK_DIR = '/home/local-admin/data/3xM/3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
+    IMG_DIR ='/mnt/morespace/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
+    DEPTH_DIR = '/mnt/morespace/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
+    MASK_DIR = '/mnt/morespace/3xM/3xM_Dataset_10_10/mask'    # Directory for mask-preprocessed images
     WIDTH = 800                       # Image width for processing
     HEIGHT = 450                      # Image height for processing
 
@@ -1299,7 +1303,7 @@ def update_output(cur_epoch,
     None
     """
     now = datetime.now()
-    output = f"Yolact Training - {now.hour:02}:{now.minute:02} {now.day:02}.{now.month:02}.{now.year:04}"
+    output = f"Mask-RCNN Training - {now.hour:02}:{now.minute:02} {now.day:02}.{now.month:02}.{now.year:04}"
 
     detail_output = f"\n| epoch: {cur_epoch:>5} || iteration: {cur_iteration:>8} || duration: {duration:>8.3f} || ETA: {eta_str:>8} || total loss: {total_loss:>8.3f} || "
     detail_output += ''.join([f' {key}: {value:>8.3f} |' for key, value in losses])
@@ -1338,7 +1342,7 @@ def pad_masks(masks, max_num_objs):
 def train_loop(log_path, learning_rate, momentum, decay, num_epochs, 
                 batch_size, dataset, data_loader, name, experiment_tracking,
                 use_depth, weights_path, should_log=True, should_save=True,
-                return_objective='model'):
+                return_objective='model', mask_score_threshold=0.9):
     """
     Train the Mask R-CNN model with the specified parameters.
 
@@ -1392,6 +1396,7 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     last_time = time.time()
     times = []
     loss_avgs = dict()
+    iou_scores = []
 
     # Training
     if should_log:
@@ -1409,6 +1414,24 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                 optimizer.zero_grad()    # gradient to zero
                 losses.backward()        # create backward gradients
                 optimizer.step()         # adjust weights towards gradients
+                
+                # Calc IOU
+                model = model.eval()
+                with torch.no_grad:
+                    outputs = model(images)
+                for output, target in zip(outputs, targets):
+                    pred_masks = (output['masks'] > mask_score_threshold).cpu().detach().numpy()
+                    true_masks = target['masks'].cpu().detach().squeeze(0).numpy()
+
+                    # Calculate IoU for each pair of predicted and true masks
+                    for pred_mask, true_mask in zip(pred_masks, true_masks):
+                        iou = calc_intersection_over_union(pred_mask, true_mask)  # Remove extra dimension
+                        iou_scores += [iou]
+                        
+                        if experiment_tracking:
+                            mlflow.log_metric("IOU", iou, step=iteration)
+                            writer.add_scalar("IOU", iou, iteration)
+                model = model.train()
 
                 # log loss avg
                 for key, value in loss_dict.items():
@@ -1441,6 +1464,7 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                 times += [duration]
 
                 if iteration % 10 == 0:
+                    
                     eta_str = str(timedelta(seconds=(max_iterations-iteration) * np.mean(np.array(times)))).split('.')[0]
                         
                     total_loss = sum([np.mean(np.array(loss_avgs[k])) for k in loss_avgs.keys()])
@@ -1464,13 +1488,14 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                     # reset
                     times = []
                     loss_avgs = dict()
+                    iou_scores = []
 
                 iteration += 1
                 # torch.cuda.empty_cache()
 
             # Save Model
-            if should_save:
-                torch.save(model.state_dict(), f'./weights/{name}.pth')
+            if should_save and epoch % 5 == 0:
+                torch.save(model.state_dict(), f'./weights/{name}_epoch_{epoch:03}.pth')
     except KeyboardInterrupt:
         if should_log:
             log(log_path, "\nStopping early. Saving network...")
@@ -1548,7 +1573,8 @@ def train(
         apply_random_brightness_contrast=True,
         apply_random_gaussian_noise=True, 
         apply_random_gaussian_blur=True,
-        apply_random_scale=True
+        apply_random_scale=True,
+        mask_score_threshold=0.9
     ):
     """
     Trains a Mask R-CNN model for instance segmentation using PyTorch.
@@ -2435,6 +2461,10 @@ def inference(
             image = image.cpu().numpy().squeeze(0)
             image = np.transpose(image, (1, 2, 0))  # Convert to HWC
             
+            # Remove 4.th channel if existing
+            if image.shape[2] == 4:
+                image = image[:, :, :3]
+            
             if use_mask:
                 masks_gt = masks.cpu().numpy()
                 masks_gt = np.transpose(masks_gt, (1, 2, 0))
@@ -2599,7 +2629,8 @@ if __name__ == "__main__":
                 apply_random_brightness_contrast=APPLY_RANDOM_BRIGHTNESS_CONTRAST,
                 apply_random_gaussian_noise=APPLY_RANDOM_GAUSSIAN_NOISE, 
                 apply_random_gaussian_blur=APPLY_RANDOM_GAUSSIAN_BLUR,
-                apply_random_scale=APPLY_RANDOM_SCALE
+                apply_random_scale=APPLY_RANDOM_SCALE,
+                mask_score_threshold=MASK_SCORE_THRESHOLD
             )
     elif MODE == RUN_MODE.HYPERPARAMETER_TUNING:
         print("Start Hyperparameter optimization...")
@@ -2627,7 +2658,8 @@ if __name__ == "__main__":
                                             apply_random_brightness_contrast=APPLY_RANDOM_BRIGHTNESS_CONTRAST,
                                             apply_random_gaussian_noise=APPLY_RANDOM_GAUSSIAN_NOISE, 
                                             apply_random_gaussian_blur=APPLY_RANDOM_GAUSSIAN_BLUR,
-                                            apply_random_scale=APPLY_RANDOM_SCALE)
+                                            apply_random_scale=APPLY_RANDOM_SCALE,
+                                            mask_score_threshold=MASK_SCORE_THRESHOLD)
                                     
         study = optuna.create_study(direction='minimize')
         study.optimize(partial_optimization_func, n_trials=20) 
