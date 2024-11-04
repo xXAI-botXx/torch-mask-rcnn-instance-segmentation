@@ -91,6 +91,7 @@ if MODE == RUN_MODE.TRAIN:
     MASK_DIR = '/mnt/morespace/3xM/3xM_Dataset_80_80/mask'    # Directory for mask-preprocessed images
     WIDTH = 1920   # 1920, 1024, 800, 640                # Image width for processing
     HEIGHT = 1080  # 1080, 576, 450, 360                    # Image height for processing
+    SHOULD_VERIFY_DATA = False
 
     DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 100                       # Number of images for random mode
@@ -100,19 +101,19 @@ if MODE == RUN_MODE.TRAIN:
 
     NUM_WORKERS = 4                    # Number of workers for data loading
 
-    MULTIPLE_DATASETS = "/mnt/morespace/3xM"           # Path to folder for training multiple models
+    MULTIPLE_DATASETS = None    # "/mnt/morespace/3xM"           # Path to folder for training multiple models
     SKIP_DATASETS = ["3xM_Test_Datasets"]
-    NAME = 'mask_rcnn_rgbd'                 # Name of the model to use
+    NAME = 'mask_rcnn_rgbd_TEST_EPOCH'                 # Name of the model to use
 
     USING_EXPERIMENT_TRACKING = True   # Enable experiment tracking
     CREATE_NEW_EXPERIMENT = True       # Whether to create a new experiment run
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
-    NUM_EPOCHS = 15                    # Number of training epochs
+    NUM_EPOCHS = 100                    # Number of training epochs
     LEARNING_RATE = 0.005             # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
     DECAY = 0.0005                     # Weight decay for regularization
-    BATCH_SIZE = 100                    # Batch size for training
+    BATCH_SIZE = 5                    # Batch size for training
     SHUFFLE = True                     # Shuffle the data during training
     
     # Decide which Data Augmentation should be applied
@@ -139,6 +140,7 @@ if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
     MASK_DIR = '/mnt/morespace/3xM/3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
     WIDTH = 1920   # 1920, 1024, 800, 640                # Image width for processing
     HEIGHT = 1080  # 1080, 576, 450, 360                    # Image height for processing
+    SHOULD_VERIFY_DATA = False
 
     DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 100                       # Number of images for random mode
@@ -177,6 +179,7 @@ if MODE == RUN_MODE.INFERENCE:
     MASK_DIR = '/mnt/morespace/3xM/3xM_Dataset_10_10/mask'    # Directory for mask-preprocessed images
     WIDTH = 800                       # Image width for processing
     HEIGHT = 450                      # Image height for processing
+    SHOULD_VERIFY_DATA = False
 
     DATA_MODE = DATA_LOADING_MODE.SINGLE  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 10                       # Number of images for random mode
@@ -411,7 +414,8 @@ class Dual_Dir_Dataset(Dataset):
                 width=1920,
                 height=1080,
                 should_print=True,
-                should_log=True
+                should_log=True,
+                should_verify_data=True
                 ):
 
         self.img_dir = img_dir
@@ -435,7 +439,8 @@ class Dual_Dir_Dataset(Dataset):
                                         data_mode=data_mode
                                         )
         
-        self.verify_data()
+        if should_verify_data:
+            self.verify_data()
 
 
 
@@ -1275,6 +1280,7 @@ def update_output(cur_epoch,
                     eta_str,
                     total_loss,
                     losses,
+                    iou,
                     batch_size,
                     log_path):
     """
@@ -1308,6 +1314,8 @@ def update_output(cur_epoch,
     detail_output = f"\n| epoch: {cur_epoch:>5} || iteration: {cur_iteration:>8} || duration: {duration:>8.3f} || ETA: {eta_str:>8} || total loss: {total_loss:>8.3f} || "
     detail_output += ''.join([f' {key}: {value:>8.3f} |' for key, value in losses])
 
+    iou_output = f"\n    -> IOU: {round(iou*100, 4)}%\n"
+
     iterations_in_cur_epoch = cur_iteration - cur_epoch*(data_size // batch_size)
     cur_epoch_progress =  iterations_in_cur_epoch / max(1, data_size // batch_size)
     cur_epoch_progress = min(int((cur_epoch_progress*100)//10), 10)
@@ -1319,7 +1327,7 @@ def update_output(cur_epoch,
 
     percentage_output = f"\nTotal Progress: |{'#'*cur_total_progress}{' '*cur_total_progress_}|    Epoch Progress: |{'#'*cur_epoch_progress}{' '*cur_epoch_progress_}|"
 
-    print_output = f"\n\n{'-'*32}\n{output}\n{detail_output}\n{percentage_output}\n"
+    print_output = f"\n\n{'-'*32}\n{output}\n{detail_output}\n{iou_output}\n{percentage_output}\n"
 
 
     # print new output
@@ -1416,21 +1424,25 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                 optimizer.step()         # adjust weights towards gradients
                 
                 # Calc IOU
-                model = model.eval()
-                with torch.no_grad:
-                    outputs = model(images)
-                for output, target in zip(outputs, targets):
-                    pred_masks = (output['masks'] > mask_score_threshold).cpu().detach().numpy()
-                    true_masks = target['masks'].cpu().detach().squeeze(0).numpy()
+                try:
+                    model = model.eval()
+                    with torch.no_grad():
+                        outputs = model(images)
+                    for output, target in zip(outputs, targets):
+                        pred_masks = (output['masks'] > mask_score_threshold).cpu().detach().numpy()
+                        true_masks = target['masks'].cpu().detach().squeeze(0).numpy()
 
-                    # Calculate IoU for each pair of predicted and true masks
-                    for pred_mask, true_mask in zip(pred_masks, true_masks):
-                        iou = calc_intersection_over_union(pred_mask, true_mask)  # Remove extra dimension
-                        iou_scores += [iou]
-                        
-                        if experiment_tracking:
-                            mlflow.log_metric("IOU", iou, step=iteration)
-                            writer.add_scalar("IOU", iou, iteration)
+                        # Calculate IoU for each pair of predicted and true masks
+                        for pred_mask, true_mask in zip(pred_masks, true_masks):
+                            pred_mask = np.squeeze(pred_mask)
+                            iou = calc_intersection_over_union(pred_mask, true_mask)  # Remove extra dimension
+                            iou_scores += [float(iou)]
+                            
+                            if experiment_tracking:
+                                mlflow.log_metric("IOU", iou, step=iteration)
+                                writer.add_scalar("IOU", iou, iteration)
+                except Exception as e:
+                    log(log_path, f"Error Occured during IOU calculation: {e}", should_log=should_log, should_print=should_log)
                 model = model.train()
 
                 # log loss avg
@@ -1482,7 +1494,8 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                             total_loss=total_loss,
                             losses=loss_labels,
                             batch_size=batch_size,
-                            log_path=log_path
+                            log_path=log_path,
+                            iou=statistics.mean(iou_scores)
                         )
 
                     # reset
@@ -1574,7 +1587,8 @@ def train(
         apply_random_gaussian_noise=True, 
         apply_random_gaussian_blur=True,
         apply_random_scale=True,
-        mask_score_threshold=0.9
+        mask_score_threshold=0.9,
+        should_verify_data=True
     ):
     """
     Trains a Mask R-CNN model for instance segmentation using PyTorch.
@@ -1684,7 +1698,7 @@ def train(
     dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=augmentation, 
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
                                 data_mode=data_mode, use_mask=True, use_depth=use_depth, log_path=log_path,
-                                width=width, height=height, should_log=True, should_print=True)
+                                width=width, height=height, should_log=True, should_print=True, should_verify_data=should_verify_data)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, collate_fn=collate_fn)
 
     # Experiment Tracking
@@ -1756,7 +1770,7 @@ def train(
                             num_epochs=num_epochs, batch_size=batch_size, dataset=dataset, data_loader=data_loader, 
                             name=name, experiment_tracking=using_experiment_tracking, use_depth=use_depth,
                             weights_path=weights_path, should_log=True, should_save=True,
-                            return_objective="None")
+                            return_objective="None", mask_score_threshold=mask_score_threshold)
 
                 # close experiment tracking
                 if is_mlflow_active():
@@ -1766,7 +1780,7 @@ def train(
                             num_epochs=num_epochs, batch_size=batch_size, dataset=dataset, data_loader=data_loader, 
                             name=name, experiment_tracking=using_experiment_tracking, use_depth=use_depth,
                             weights_path=weights_path, should_log=True, should_save=True,
-                            return_objective="None")
+                            return_objective="None", mask_score_threshold=mask_score_threshold)
 
 
 
@@ -1793,7 +1807,8 @@ def hyperparameter_optimization(trial,
                                 apply_random_brightness_contrast=True,
                                 apply_random_gaussian_noise=True, 
                                 apply_random_gaussian_blur=True,
-                                apply_random_scale=True
+                                apply_random_scale=True,
+                                should_verify_data=True
                             ):
     now = datetime.now()
     print(f"    - Start next trial ({now.hour:02}:{now.minute:02} {now.day:02}.{now.month:02}.{now.year:04})")
@@ -1820,7 +1835,7 @@ def hyperparameter_optimization(trial,
     dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=augmentation, 
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
                                 data_mode=data_mode, use_mask=True, use_depth=use_depth, log_path=None,
-                                width=width, height=height, should_log=True, should_print=True)
+                                width=width, height=height, should_log=True, should_print=True, should_verify_data=should_verify_data)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
 
     # Call training function
@@ -2108,6 +2123,10 @@ def calc_intersection_over_union(mask_1, mask_2):
     intersection_area = np.sum(intersection)
     union_area = np.sum(union)
     
+    # Avoid division by zero
+    if union_area == 0:
+        return 0.0
+    
     return intersection_area / union_area
 
 
@@ -2363,7 +2382,8 @@ def inference(
         show_evaluation=False,
         width=1920,
         height=1080,
-        mask_threshold=0.9
+        mask_threshold=0.9,
+        should_verify_data=True
     ):
     """
     Perform inference using a Mask R-CNN model with the provided dataset and parameters, while also
@@ -2413,7 +2433,7 @@ def inference(
     dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=Inference_Augmentations(width=width, height=height), 
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
                                 data_mode=data_mode, use_mask=use_mask, use_depth=use_depth, log_path=None,
-                                width=width, height=height, should_log=False, should_print=True)
+                                width=width, height=height, should_log=False, should_print=True, should_verify_data=should_verify_data)
     data_loader = DataLoader(dataset, batch_size=1, num_workers=num_workers, collate_fn=collate_fn)
 
     all_images_size = len(data_loader)
@@ -2630,7 +2650,8 @@ if __name__ == "__main__":
                 apply_random_gaussian_noise=APPLY_RANDOM_GAUSSIAN_NOISE, 
                 apply_random_gaussian_blur=APPLY_RANDOM_GAUSSIAN_BLUR,
                 apply_random_scale=APPLY_RANDOM_SCALE,
-                mask_score_threshold=MASK_SCORE_THRESHOLD
+                mask_score_threshold=MASK_SCORE_THRESHOLD,
+                should_verify_data=SHOULD_VERIFY_DATA
             )
     elif MODE == RUN_MODE.HYPERPARAMETER_TUNING:
         print("Start Hyperparameter optimization...")
@@ -2659,7 +2680,9 @@ if __name__ == "__main__":
                                             apply_random_gaussian_noise=APPLY_RANDOM_GAUSSIAN_NOISE, 
                                             apply_random_gaussian_blur=APPLY_RANDOM_GAUSSIAN_BLUR,
                                             apply_random_scale=APPLY_RANDOM_SCALE,
-                                            mask_score_threshold=MASK_SCORE_THRESHOLD)
+                                            mask_score_threshold=MASK_SCORE_THRESHOLD,
+                                            should_verify_data=SHOULD_VERIFY_DATA
+                                            )
                                     
         study = optuna.create_study(direction='minimize')
         study.optimize(partial_optimization_func, n_trials=20) 
@@ -2696,7 +2719,8 @@ if __name__ == "__main__":
                 show_evaluation=SHOW_EVALUATION,
                 width=WIDTH,
                 height=HEIGHT,
-                mask_threshold=MASK_SCORE_THRESHOLD
+                mask_threshold=MASK_SCORE_THRESHOLD,
+                should_verify_data=SHOULD_VERIFY_DATA
         )
     # elif MODE == RUN_MODE.SIMPLE_INFERENCE:
     #     simple_inference(
