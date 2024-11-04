@@ -2138,8 +2138,34 @@ def calc_pixel_accuracy(mask_1, mask_2):
     matching_pixels = np.sum(mask_1 == mask_2)
     all_pixels = np.prod(mask_1.shape)
     return matching_pixels / all_pixels
+
+
+
+def calc_bg_fg_acc_accuracy(mask_1, mask_2):
+    """
+    Calculate the pixel accuracy from the background and foreground between two masks.
+
+    Args:
+    -----
+        mask_1 (np.ndarray): The first mask.
+        mask_2 (np.ndarray): The second mask.
+
+    Returns:
+    --------
+        float: The pixel accuracy between the two masks.
+
+    Raises:
+    -------
+        ValueError: If the shapes of the masks are different.
+    """
+    if mask_1.shape != mask_2.shape:
+        raise ValueError(f"Can't calculate the pixel accuracy between the 2 masks because of different shapes: {mask_1.shape} and {mask_2.shape}")
     
+    matching_pixels = np.sum((mask_1 > 0) & (mask_2 > 0)) + np.sum((mask_1 == 0) & (mask_2 == 0))
+    all_pixels = np.prod(mask_1.shape)
+    return matching_pixels / all_pixels
    
+    
     
 def calc_intersection_over_union(mask_1, mask_2):
     """
@@ -2312,9 +2338,10 @@ def calc_false_negative_rate(mask_1, mask_2):
     return FN / (FN + TP) if FN + TP != 0 else 0
 
 
-def plot_and_save_evaluation(pixel_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name="instance_segmentation", should_print=True, should_save=True, save_path="./output"):
+def plot_and_save_evaluation(pixel_acc, bg_fg_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name="instance_segmentation", should_print=True, should_save=True, save_path="./output"):
     eval_str = "\nEvaluation:\n"
     eval_str += f"    - Pixel Accuracy = {round(pixel_acc * 100, 2)}%\n"
+    eval_str += f"    - Background Foreground Accuracy = {round(bg_fg_acc * 100, 2)}%\n"
     eval_str += f"    - IoU = {iou}\n"
     eval_str += f"    - Precision = {round(precision * 100, 2)}%\n        -> How many positive predicted are really positive\n        -> Only BG/FG\n"
     eval_str += f"    - Recall = {round(recall * 100, 2)}%\n        -> How many positive were found\n        -> Only BG/FG\n"
@@ -2330,6 +2357,8 @@ def plot_and_save_evaluation(pixel_acc, iou, precision, recall, f1_score, dice, 
         path = os.path.join(save_path, f"{name}_eval.txt")
         with open(path, "w") as eval_file:
             eval_file.write(eval_str)
+            
+    return eval_str
 
 
 def eval_pred(pred, ground_truth, name="instance_segmentation", should_print=True, should_save=True, save_path="./output"):
@@ -2347,8 +2376,9 @@ def eval_pred(pred, ground_truth, name="instance_segmentation", should_print=Tru
         tuple: Evaluation metrics including pixel accuracy, IoU, precision, recall, F1 score, Dice coefficient, FPR, and FNR.
     """
     pixel_acc = calc_metric_with_object_matching(pred, ground_truth, calc_pixel_accuracy)
+    bg_fg_acc = calc_metric_with_object_matching(pred, ground_truth, calc_bg_fg_acc_accuracy)
     iou = calc_metric_with_object_matching(pred, ground_truth, calc_intersection_over_union)
-    precision, recall = calc_metric_with_object_matching(pred, ground_truth, calc_precision_and_recall)
+    precision, recall = calc_precision_and_recall(pred, ground_truth, only_bg_and_fg=True)
     f1_score = calc_f1_score(precision, recall)
     dice = calc_metric_with_object_matching(pred, ground_truth, calc_dice_coefficient)
     fpr = calc_metric_with_object_matching(pred, ground_truth, calc_false_positive_rate)
@@ -2356,15 +2386,16 @@ def eval_pred(pred, ground_truth, name="instance_segmentation", should_print=Tru
 
     plot_and_save_evaluation(pixel_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name=name, should_print=should_print, should_save=should_save, save_path=save_path)
 
-    return pixel_acc, iou, precision, recall, f1_score, dice, fpr, fnr
+    return pixel_acc, bg_fg_acc, iou, precision, recall, f1_score, dice, fpr, fnr
 
 
 
 def update_evaluation_summary(sum_dict, results):
-    pixel_acc, iou, precision, recall, f1_score, dice, fpr, fnr = results
+    pixel_acc, bg_fg_acc, iou, precision, recall, f1_score, dice, fpr, fnr = results
 
     eval_key_value = [
         ["pixel accuracy", pixel_acc],
+        ["background foreground accuracy", bg_fg_acc],
         ["intersection over union", iou],
         ["precision", precision], 
         ["recall", recall], 
@@ -2387,6 +2418,7 @@ def update_evaluation_summary(sum_dict, results):
 def save_and_show_evaluation_summary(sum_dict, name="instance_segmentation", should_print=True, should_save=True, save_path="./output"):
 
     pixel_acc = statistics.mean(sum_dict["pixel accuracy"])
+    bg_fg_acc = statistics.mean(sum_dict["background foreground accuracy"])
     iou = statistics.mean(sum_dict["intersection over union"])
     precision = statistics.mean(sum_dict["precision"])
     recall = statistics.mean(sum_dict["recall"])
@@ -2395,7 +2427,7 @@ def save_and_show_evaluation_summary(sum_dict, name="instance_segmentation", sho
     fpr = statistics.mean(sum_dict["false positive rate"])
     fnr = statistics.mean(sum_dict["false negative rate"])
 
-    plot_and_save_evaluation(pixel_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name=name, should_print=should_print, should_save=should_save, save_path=save_path)
+    plot_and_save_evaluation(pixel_acc, bg_fg_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name=name, should_print=should_print, should_save=should_save, save_path=save_path)
 
 
 
