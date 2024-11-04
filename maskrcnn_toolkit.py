@@ -110,7 +110,7 @@ if MODE == RUN_MODE.TRAIN:
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
     NUM_EPOCHS = 100                    # Number of training epochs
-    LEARNING_RATE = 0.005             # Learning rate for the optimizer
+    LEARNING_RATE = 0.05             # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
     DECAY = 0.0005                     # Weight decay for regularization
     BATCH_SIZE = 5                    # Batch size for training
@@ -243,6 +243,7 @@ import mlflow.pytorch
 
 # optimization
 import optuna
+from scipy.optimize import linear_sum_assignment
 
 
 ###########
@@ -1280,7 +1281,7 @@ def update_output(cur_epoch,
                     eta_str,
                     total_loss,
                     losses,
-                    iou,
+                    # eval_str,
                     batch_size,
                     log_path):
     """
@@ -1314,8 +1315,6 @@ def update_output(cur_epoch,
     detail_output = f"\n| epoch: {cur_epoch:>5} || iteration: {cur_iteration:>8} || duration: {duration:>8.3f} || ETA: {eta_str:>8} || total loss: {total_loss:>8.3f} || "
     detail_output += ''.join([f' {key}: {value:>8.3f} |' for key, value in losses])
 
-    iou_output = f"\n    -> IOU: {round(iou*100, 4)}%\n"
-
     iterations_in_cur_epoch = cur_iteration - cur_epoch*(data_size // batch_size)
     cur_epoch_progress =  iterations_in_cur_epoch / max(1, data_size // batch_size)
     cur_epoch_progress = min(int((cur_epoch_progress*100)//10), 10)
@@ -1327,7 +1326,7 @@ def update_output(cur_epoch,
 
     percentage_output = f"\nTotal Progress: |{'#'*cur_total_progress}{' '*cur_total_progress_}|    Epoch Progress: |{'#'*cur_epoch_progress}{' '*cur_epoch_progress_}|"
 
-    print_output = f"\n\n{'-'*32}\n{output}\n{detail_output}\n{iou_output}\n{percentage_output}\n"
+    print_output = f"\n\n{'-'*32}\n{output}\n{detail_output}\n{percentage_output}\n"    # {eval_str}\n"
 
 
     # print new output
@@ -1404,7 +1403,8 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     last_time = time.time()
     times = []
     loss_avgs = dict()
-    iou_scores = []
+    eval_sum_dict = dict()
+    # eval_str = ""
 
     # Training
     if should_log:
@@ -1423,27 +1423,39 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                 losses.backward()        # create backward gradients
                 optimizer.step()         # adjust weights towards gradients
                 
-                # Calc IOU
-                try:
-                    model = model.eval()
-                    with torch.no_grad():
-                        outputs = model(images)
-                    for output, target in zip(outputs, targets):
-                        pred_masks = (output['masks'] > mask_score_threshold).cpu().detach().numpy()
-                        true_masks = target['masks'].cpu().detach().squeeze(0).numpy()
-
-                        # Calculate IoU for each pair of predicted and true masks
-                        for pred_mask, true_mask in zip(pred_masks, true_masks):
-                            pred_mask = np.squeeze(pred_mask)
-                            iou = calc_intersection_over_union(pred_mask, true_mask)  # Remove extra dimension
-                            iou_scores += [float(iou)]
+                # # Calc Metrics
+                # try:
+                #     model = model.eval()
+                #     with torch.no_grad():
+                #         outputs = model(images)
+                #     for output, target in zip(outputs, targets):
+                #         # print(f"Mask-GT: {target['masks'].cpu().numpy().shape}")
+                #         # print(f"Results-Mask: {output['masks'].cpu().numpy().shape}")
+                        
+                #         masks_gt = target['masks'].cpu().numpy()
+                #         masks_gt = np.transpose(masks_gt, (1, 2, 0))
+                #         extracted_masks_gt = extract_and_visualize_mask(masks_gt, image=None, ax=None, visualize=False, color_map=None, soft_join=False)
+                        
+                #         result_masks = output['masks'].cpu().squeeze(0).numpy()
+                #         result_masks = (result_masks > mask_score_threshold).astype(np.uint8)
+                #         result_masks = np.transpose(result_masks, (1, 2, 0))
+                #         extracted_result_mask = extract_and_visualize_mask(result_masks, image=None, ax=None, visualize=False, color_map=None, soft_join=False)
+                        
+                #         eval_results = eval_pred(extracted_result_mask, extracted_masks_gt, name="train", should_print=False, should_save=False, save_path=None)
+                #         eval_sum_dict = update_evaluation_summary(sum_dict=eval_sum_dict, results=eval_results)
+                        
+                #         eval_str = "\nMetrics:"
+                #         for key, value in eval_sum_dict.items():
+                #             value = round(statistics.mean(value), 6)
                             
-                            if experiment_tracking:
-                                mlflow.log_metric("IOU", iou, step=iteration)
-                                writer.add_scalar("IOU", iou, iteration)
-                except Exception as e:
-                    log(log_path, f"Error Occured during IOU calculation: {e}", should_log=should_log, should_print=should_log)
-                model = model.train()
+                #             eval_str += f"\n    -> {key}: {round(value, 4)}"
+                            
+                #             if experiment_tracking:
+                #                 mlflow.log_metric(key, value, step=iteration)
+                #                 writer.add_scalar(key, value, iteration)
+                # except Exception as e:
+                #     log(log_path, f"Error Occured during Metrics calculation: {e}", should_log=should_log, should_print=should_log)
+                # model = model.train()
 
                 # log loss avg
                 for key, value in loss_dict.items():
@@ -1495,13 +1507,13 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                             losses=loss_labels,
                             batch_size=batch_size,
                             log_path=log_path,
-                            iou=statistics.mean(iou_scores)
+                            # eval_str=eval_str
                         )
 
                     # reset
                     times = []
                     loss_avgs = dict()
-                    iou_scores = []
+                    # eval_sum_dict = dict()
 
                 iteration += 1
                 # torch.cuda.empty_cache()
@@ -1541,7 +1553,8 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
             total_loss=total_loss,
             losses=loss_labels,
             batch_size=batch_size,
-            log_path=log_path
+            log_path=log_path,
+            # eval_str=eval_str
         )
 
         log(log_path, f"\nCongratulations!!!! Your Model trained succefull!\n\n Your model waits here for you: '{f'./weights/{name}.pth'}'", should_log=True, should_print=True)
@@ -2071,6 +2084,40 @@ def visualize_results(image, predictions, score_threshold=0.5):
 
 
 
+def calc_metric_with_object_matching(mask_1, mask_2, metric_func):
+    """
+    Calculates the best fitting metric on the given func.
+    
+    The objects can have different orders, which is not bad at all and have to match better.
+    """
+    if mask_1.shape != mask_2.shape:
+        raise ValueError(f"Can't calculate the IoU between the 2 masks because of different shapes: {mask_1.shape} and {mask_2.shape}")
+    
+    labels_1 = np.unique(mask_1)
+    labels_2 = np.unique(mask_2)
+    
+    # Remove the background (0 label)
+    labels_1 = labels_1[labels_1 != 0]
+    labels_2 = labels_2[labels_2 != 0]
+    
+    metric_matrix = np.zeros((len(labels_1), len(labels_2)))
+    
+    # Compute the metric for each pair of labels
+    for i, label_1 in enumerate(labels_1):
+        for j, label_2 in enumerate(labels_2):
+            cur_mask_1 = np.where(mask_1 == label_1, 1, 0)
+            cur_mask_2 = np.where(mask_2 == label_2, 1, 0)
+            metric_matrix[i, j] = metric_func(cur_mask_1, cur_mask_2)
+    
+    # Use Hungarian algorithm to maximize total metric func across matched pairs
+    row_ind, col_ind = linear_sum_assignment(-metric_matrix)  # maximize IoU
+    
+    # Calculate mean IoU for matched pairs
+    matched_metrics = [metric_matrix[i, j] for i, j in zip(row_ind, col_ind)]
+    return np.mean(matched_metrics) if matched_metrics else 0.0
+
+
+
 def calc_pixel_accuracy(mask_1, mask_2):
     """
     Calculate the pixel accuracy between two masks.
@@ -2094,9 +2141,9 @@ def calc_pixel_accuracy(mask_1, mask_2):
     matching_pixels = np.sum(mask_1 == mask_2)
     all_pixels = np.prod(mask_1.shape)
     return matching_pixels / all_pixels
-
-
-
+    
+   
+    
 def calc_intersection_over_union(mask_1, mask_2):
     """
     Calculate the Intersection over Union (IoU) between two masks.
@@ -2114,9 +2161,6 @@ def calc_intersection_over_union(mask_1, mask_2):
     -------
         ValueError: If the shapes of the masks are different.
     """
-    if mask_1.shape != mask_2.shape:
-        raise ValueError(f"Can't calculate the IoU between the 2 masks because of different shapes: {mask_1.shape} and {mask_2.shape}")
-    
     intersection = np.logical_and(mask_1, mask_2)
     union = np.logical_or(mask_1, mask_2)
     
@@ -2305,13 +2349,13 @@ def eval_pred(pred, ground_truth, name="instance_segmentation", should_print=Tru
     --------
         tuple: Evaluation metrics including pixel accuracy, IoU, precision, recall, F1 score, Dice coefficient, FPR, and FNR.
     """
-    pixel_acc = calc_pixel_accuracy(pred, ground_truth)
-    iou = calc_intersection_over_union(pred, ground_truth)
-    precision, recall = calc_precision_and_recall(pred, ground_truth, only_bg_and_fg=True)
+    pixel_acc = calc_metric_with_object_matching(pred, ground_truth, calc_pixel_accuracy)
+    iou = calc_metric_with_object_matching(pred, ground_truth, calc_intersection_over_union)
+    precision, recall = calc_metric_with_object_matching(pred, ground_truth, calc_precision_and_recall)
     f1_score = calc_f1_score(precision, recall)
-    dice = calc_dice_coefficient(pred, ground_truth)
-    fpr = calc_false_positive_rate(pred, ground_truth)
-    fnr = calc_false_negative_rate(pred, ground_truth)
+    dice = calc_metric_with_object_matching(pred, ground_truth, calc_dice_coefficient)
+    fpr = calc_metric_with_object_matching(pred, ground_truth, calc_false_positive_rate)
+    fnr = calc_metric_with_object_matching(pred, ground_truth, calc_false_negative_rate)
 
     plot_and_save_evaluation(pixel_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name=name, should_print=should_print, should_save=should_save, save_path=save_path)
 
