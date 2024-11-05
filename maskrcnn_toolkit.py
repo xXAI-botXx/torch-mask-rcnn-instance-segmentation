@@ -122,6 +122,7 @@ if MODE == RUN_MODE.TRAIN:
     APPLY_RANDOM_GAUSSIAN_NOISE = True
     APPLY_RANDOM_GAUSSIAN_BLUR = True
     APPLY_RANDOM_SCALE = True
+    APPLY_RANDOM_BACKGROUND_MODIFICATION = True
     
     MASK_SCORE_THRESHOLD = 0.9
 
@@ -158,6 +159,7 @@ if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
     APPLY_RANDOM_GAUSSIAN_NOISE = True
     APPLY_RANDOM_GAUSSIAN_BLUR = True
     APPLY_RANDOM_SCALE = True
+    APPLY_RANDOM_BACKGROUND_MODIFICATION = True
     
     MASK_SCORE_THRESHOLD = 0.9
     
@@ -320,33 +322,6 @@ def clear_printing():
 
 
 
-# def resize_with_padding(image, target_h, target_w, method=cv2.INTER_LINEAR)    # cv2.INTER_NEAREST
-#     h, w = image.shape[:2]
-    
-#     # if the size is already right, then return original image
-#     if h == target_h and w == target_w:
-#         return image
-
-#     # Calculate padding
-#     pad_h = max(target_h - h, 0)
-#     pad_w = max(target_w - w, 0)
-    
-#     # Add padding to the image
-#     padded_image = cv2.copyMakeBorder(
-#         image, 
-#         0, pad_h, 
-#         0, pad_w, 
-#         cv2.BORDER_CONSTANT, 
-#         value=[0, 0, 0]  # You can change the padding color here if necessary
-#     )
-    
-#     # Resize the padded image to the target size
-#     resized_image = cv2.resize(padded_image, (target_w, target_h), interpolation=method)
-    
-#     return resized_image
-
-
-
 class Dual_Dir_Dataset(Dataset):
     """
     A dataset class for loading and processing images, depth maps, and masks 
@@ -435,7 +410,10 @@ class Dual_Dir_Dataset(Dataset):
                                         data_mode=data_mode
                                         )
         
-        # self.verify_data()
+        self.verify_data()
+
+        # update augmentations -> needed for background augmentation
+        self.transform.update(bg_value=self.background_value)
 
 
 
@@ -582,26 +560,6 @@ class Dual_Dir_Dataset(Dataset):
             
             boxes.append([x_min, y_min, x_max, y_max])
         return torch.as_tensor(boxes, dtype=torch.float32)
-    
-        # boxes = []
-        
-        # for mask in masks:
-        #     pos = np.where(mask == 1)
-        #     if len(pos[0]) == 0 or len(pos[1]) == 0:  # Check if there are no valid object pixels
-        #         continue  # Skip empty masks
-
-        #     x_min = np.min(pos[1])
-        #     x_max = np.max(pos[1])
-        #     y_min = np.min(pos[0])
-        #     y_max = np.max(pos[0])
-
-        #     # Ensure the bounding box has positive width and height
-        #     if x_max > x_min and y_max > y_min:
-        #         boxes.append([x_min, y_min, x_max, y_max])
-        
-        # if len(boxes) == 0:
-        #     return torch.zeros((0, 4), dtype=torch.float32)  # Return an empty tensor if no valid boxes
-        # return torch.as_tensor(boxes, dtype=torch.float32)
     
 
 
@@ -765,6 +723,7 @@ class Dual_Dir_Dataset(Dataset):
                     most_used_bg_amount = value
         self.background_value = most_used_bg_value
         log(self.log_path, f"Auto background Detection: Found '{most_used_bg_value}' as Background value (used in {round((most_used_bg_amount / all_images_size)*100, 2)}% of images as lowest value)", should_log=self.should_log, should_print=self.should_print)
+
 
 
     def load_datanames(
@@ -1072,6 +1031,83 @@ class Random_Scale:
 
 
 
+class Random_Background_Modification:
+    def __init__(self, bg_value=1, width=1920, height=1080):
+        self.bg_value = bg_value
+        self.width = width
+        self.height = height
+    
+    def __call__(self, images):
+        rgb_img, depth_img, mask_img = images
+        
+        if random.random() > 0.6:
+            mode = random.choice(["noise", "checkerboard", "gradient pattern", "color shift"])
+
+            if mode == "noise":
+                background_pattern = np.random.randint(0, 256, (self.height, self.width, 3), dtype=np.uint8)
+            elif mode == "checkerboard":
+                checker_size = random.choice([5, 10, 25, 50])
+                color1 = random.randint(180, 255)
+                color1 = [color1, color1, color1]    # Brighter Color
+                color2 = random.randint(0, 130)
+                color2 = [color2, color2, color2]    # Darker Color
+
+                # Create the checkerboard pattern
+                background_pattern = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+                for i in range(0, self.height, checker_size):
+                    for j in range(0, self.width, checker_size):
+                        color = color1 if (i // checker_size + j // checker_size) % 2 == 0 else color2
+                        background_pattern[i:i+checker_size, j:j+checker_size] = color
+            elif mode == "gradient pattern":
+                background_pattern = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+
+                # Generate a gradient
+                if random.random() > 0.5:
+                    for i in range(self.height):
+                        color_value = int(255 * (i / self.height))
+                        background_pattern[i, :] = [color_value, color_value, color_value]
+                else:
+                    for i in range(self.width):
+                        color_value = int(255 * (i / self.width))
+                        background_pattern[:, i] = [color_value, color_value, color_value]
+            else:
+                B, G, R = cv2.split(rgb_img)
+
+                # create shift
+                add_B = np.full(B.shape, random.randint(10, 150), dtype=np.uint8)
+                add_G = np.full(G.shape, random.randint(10, 150), 100, dtype=np.uint8)
+                add_R = np.full(R.shape, random.randint(10, 150), 100, dtype=np.uint8)
+                
+                # make shift
+                shifted_B = cv2.add(B, add_B) if random.random() > 0.5 else cv2.subtract(B, add_B)
+
+                shifted_G = cv2.add(G, add_G) if random.random() > 0.5 else cv2.subtract(G, add_G)
+
+                shifted_R = cv2.add(R, add_R) if random.random() > 0.5 else cv2.subtract(R, add_R)
+
+                # apply shift
+                background_pattern = cv2.merge((shifted_B, shifted_G, shifted_R))
+
+            # apply pattern only on background:
+
+            # get pattern in right size
+            background_pattern = cv2.resize(background_pattern, (rgb_img.shape[1], rgb_img.shape[0]))
+
+            # Create mask for background and objects
+            bg_mask = (mask_img == self.bg_value).astype(np.uint8)
+            fg_mask = 1 - bg_mask
+
+            # Combine the original image and generated pattern
+            background_with_pattern = cv2.bitwise_and(background_pattern, background_pattern, mask=bg_mask)
+            objects_only = cv2.bitwise_and(rgb_img, rgb_img, mask=fg_mask)
+
+            # Overlay the generated pattern and the original objects
+            result = cv2.add(background_with_pattern, objects_only)
+        
+        return result, depth_img, mask_img
+
+
+
 class Resize:
     def __init__(self, width=1920, height=1080):
         self.target_size = (height, width)
@@ -1103,11 +1139,12 @@ class Resize:
 
 
 class Train_Augmentations:
-    def __init__(self, width, height, 
+    def __init__(self, width, height,
                  apply_random_flip, apply_random_rotation,
                  apply_random_crop, apply_random_brightness_contrast,
                  apply_random_gaussian_noise, apply_random_gaussian_blur,
                  apply_random_scale,
+                 apply_random_background_modification,
                  log_path=None, should_log=True, should_print=True):
         transformations = []
         
@@ -1140,15 +1177,38 @@ class Train_Augmentations:
         if apply_random_scale:
             transformations += [Random_Scale(scale_range=(0.8, 1.2))]
             info_str += "Random Scale, "
+
+        if apply_random_background_modification:
+            # added through the update function
+            # transformations += [Random_Background_Modification(bg_value=1, width=width, height=height)]
+            info_str += "Random Background Modification, "
+            
             
         if len(transformations) <= 0:
             log(log_path, "Using no Data Augmentation!", should_log=should_log, should_print=should_print)
         else:
             log(log_path, info_str[:-2], should_log=should_log, should_print=should_print)
     
-        transformations += [Resize(width=width, height=height)]
+        if not apply_random_background_modification:
+            transformations += [Resize(width=width, height=height)]
     
+        self.width = width
+        self.height = height
+        self.transformations = transformations
         self.augmentations = T.Compose(transformations)
+        self.apply_random_background_modification = apply_random_background_modification
+
+    def update(self, bg_value=None):
+        if self.apply_random_background_modification and bg_value is None:
+            raise ValueError("If choosing apply_random_background_modification = True,you have to pass a background value to the augmentation update.")
+
+        if self.apply_random_background_modification:
+            self.transformations += [Random_Background_Modification(bg_value=bg_value, width=self.width, height=self.height)]
+
+        if self.apply_random_background_modification:
+            self.transformations += [Resize(width=self.width, height=self.height)]
+    
+        self.augmentations = T.Compose(self.transformations)
 
     def __call__(self, rgb_img, depth_img, mask_img):
         
@@ -1170,6 +1230,9 @@ class Inference_Augmentations:
         self.augmentations = T.Compose([
             Resize(width=width, height=height),
         ])
+
+    def update(self, bg_value=None):
+        pass
 
     def __call__(self, rgb_img, depth_img, mask_img):
         
@@ -1599,6 +1662,7 @@ def train(
         apply_random_gaussian_noise=True, 
         apply_random_gaussian_blur=True,
         apply_random_scale=True,
+        apply_random_background_modification=True,
         mask_score_threshold=0.9
     ):
     """
@@ -1666,6 +1730,8 @@ def train(
         Should the data augmentation random gaussian blur should be applied. Defaut is True.
     apply_random_scale : bool, optional
         Should the data augmentation random scale should be applied. Defaut is True.
+    apply_random_background_modification : bool, optional
+        Should the data augmentation random background modification should be applied. Default is True. Includes Colorshift, Noise, Checkerboard pattern and color gradient pattern.
 
     Returns:
     --------
@@ -1695,7 +1761,7 @@ def train(
 
     # Dataset and DataLoader
     log(log_path, "Loading the data...")
-    augmentation = Train_Augmentations(width=width, height=height,
+    augmentation = Train_Augmentations(width=width, height=height, 
                                         apply_random_flip=apply_random_flip, 
                                         apply_random_rotation=apply_random_rotation,
                                         apply_random_crop=apply_random_crop, 
@@ -1703,6 +1769,7 @@ def train(
                                         apply_random_gaussian_noise=apply_random_gaussian_noise, 
                                         apply_random_gaussian_blur=apply_random_gaussian_blur,
                                         apply_random_scale=apply_random_scale,
+                                        apply_random_background_modification=apply_random_background_modification,
                                         log_path=log_path,
                                         should_log=True,
                                         should_print=True)
@@ -2722,6 +2789,7 @@ if __name__ == "__main__":
                 apply_random_gaussian_noise=APPLY_RANDOM_GAUSSIAN_NOISE, 
                 apply_random_gaussian_blur=APPLY_RANDOM_GAUSSIAN_BLUR,
                 apply_random_scale=APPLY_RANDOM_SCALE,
+                apply_random_background_modification=APPLY_RANDOM_BACKGROUND_MODIFICATION,
                 mask_score_threshold=MASK_SCORE_THRESHOLD
             )
     elif MODE == RUN_MODE.HYPERPARAMETER_TUNING:
@@ -2751,6 +2819,7 @@ if __name__ == "__main__":
                                             apply_random_gaussian_noise=APPLY_RANDOM_GAUSSIAN_NOISE, 
                                             apply_random_gaussian_blur=APPLY_RANDOM_GAUSSIAN_BLUR,
                                             apply_random_scale=APPLY_RANDOM_SCALE,
+                                            apply_random_background_modification=APPLY_RANDOM_BACKGROUND_MODIFICATION,
                                             mask_score_threshold=MASK_SCORE_THRESHOLD)
                                     
         study = optuna.create_study(direction='minimize')
