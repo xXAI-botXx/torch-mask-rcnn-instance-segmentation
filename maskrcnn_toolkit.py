@@ -204,6 +204,10 @@ if MODE == RUN_MODE.INFERENCE:
     SAVE_EVALUATION = True             # Save the evaluation results
     SHOW_EVALUATION = False             # Display the evaluation results
 
+    SHOW_INSIGHTS = False
+    SAVE_INSIGHTS = True
+
+
 
 
 
@@ -1968,6 +1972,59 @@ def hyperparameter_optimization(trial,
 
 
 
+DNN_INSIGHTS = {}
+
+def register_hook(layer, layer_name):
+    def hook(module, input, output):
+        DNN_INSIGHTS[layer_name] = output.detach().cpu()
+    layer.register_forward_hook(hook)
+
+
+
+def register_maskrcnn_hooks(model):
+    # register_hook(model.fpn.layer2, "fpn.layer2")
+    register_hook(model.fpn, "fpn")
+    register_hook(model.rpn, "rpn")
+    register_hook(model.roi_heads.box_roi_pool, "roi_aligns")
+
+
+
+def visualize_insights(insights:dict, should_save, save_path, name, should_show):
+    for layer_name, insight in insights.items():
+        # insight = insight[0]
+        # n_chnneös = insight.shape[0]
+        
+        # choose a subset to show
+        n_channels = insight.size(1)
+        n_images = min(4, n_channels)
+
+        fig, ax = plt.subplots(ncols=1, nrows=n_images, figsize=(20*n_images, 15))
+        fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.1, hspace=0.1)
+        
+        for i in range(n_images):
+            # plot cur insight
+            if n_images > 1:
+                ax[i].imshow(insight[i].cpu().numpy(), cmap="viridis")
+                ax[i].set_title(f"{layer_name} - Channel: {i+1}")
+                ax[i].axis("off")
+            else:
+                ax.imshow(insight[i].cpu().numpy(), cmap="viridis")
+                ax.set_title(f"{layer_name} - Channel: {i+1}")
+                ax.axis("off")
+
+        plt.suptitle(f"Feature-Map: {layer_name}")
+
+        if should_save:
+            plt.savefig(os.path.join(save_path, f"{name}_insights_{layer_name}.jpg"), dpi=fig.dpi)
+
+        if should_show:
+            print("\nShowing Ground Truth Visualization*")
+            plt.show()
+        else:
+            plt.clf()
+
+
+
 def transform_mask(mask, one_dimensional=False, input_color_map=None):
     """
     Transform a mask into a visible mask with color coding.
@@ -2537,7 +2594,9 @@ def inference(
         show_evaluation=False,
         width=1920,
         height=1080,
-        mask_threshold=0.9
+        mask_threshold=0.9,
+        show_insights=False,
+        save_insights=True
     ):
     """
     Perform inference using a Mask R-CNN model with the provided dataset and parameters, while also
@@ -2579,6 +2638,8 @@ def inference(
         - Evaluation is done when ground-truth masks are provided, comparing prediction accuracy.
     """
 
+    global DNN_INSIGHTS
+
     print(f"\n\nxX Mask-RCNN Inference Xx")
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -2601,6 +2662,9 @@ def inference(
         model = load_maskrcnn(weights_path=weights_path, use_4_channels=use_depth, pretrained=False)
         model.eval()
         model = model.to(device)
+
+        if show_insights or save_insights:
+            register_maskrcnn_hooks(model=model)
         
         idx = 1
 
@@ -2733,8 +2797,12 @@ def inference(
                         plt.show()
                     else:
                         plt.clf()
+
+            if show_insights or save_insights:
+                visualize_insights(insights=DNN_INSIGHTS, should_save=save_insights, save_path=visualization_dir, name=cleaned_name, should_show=show_insights)
                         
             idx += 1
+            DNN_INSIGHTS = {}
 
         if use_mask:
             save_and_show_evaluation_summary(eval_sum_dict, name="Complete-Evaluation", should_print=show_evaluation, should_save=save_evaluation, save_path=output_dir)
@@ -2873,7 +2941,9 @@ if __name__ == "__main__":
                 show_evaluation=SHOW_EVALUATION,
                 width=WIDTH,
                 height=HEIGHT,
-                mask_threshold=MASK_SCORE_THRESHOLD
+                mask_threshold=MASK_SCORE_THRESHOLD,
+                show_insights=SHOW_INSIGHTS,
+                save_insights=SAVE_INSIGHTS
         )
     
     
