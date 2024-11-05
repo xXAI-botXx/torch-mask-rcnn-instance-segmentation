@@ -1,5 +1,8 @@
 /output/*
 /weights/*
+/mlruns/*
+/runs/*
+/logs/*
 
 
 

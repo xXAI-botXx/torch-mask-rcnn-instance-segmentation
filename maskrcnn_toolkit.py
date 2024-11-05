@@ -49,6 +49,7 @@ By Tobia Ippolito <3
 ###############
 # definitions #
 ###############
+import os
 from enum import Enum
 
 class DATA_LOADING_MODE(Enum):
@@ -83,11 +84,13 @@ MODE = RUN_MODE.TRAIN
 # -------- #
 if MODE == RUN_MODE.TRAIN:
     WEIGHTS_PATH = None  # Path to the model weights file
-    USE_DEPTH = True                   # Whether to include depth information -> as rgb and depth on green channel
+    USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
 
-    IMG_DIR ='/mnt/morespace/3xM/3xM_Dataset_80_80/rgb'        # Directory for RGB images
-    DEPTH_DIR = '/mnt/morespace/3xM/3xM_Dataset_80_80/depth'  # Directory for depth-preprocessed images
-    MASK_DIR = '/mnt/morespace/3xM/3xM_Dataset_80_80/mask'    # Directory for mask-preprocessed images
+    GROUND_PATH = "D:/3xM"    # "/mnt/morespace/3xM"
+    DATASET_NAME = "3xM_Dataset_160_80"
+    IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
+    DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
+    MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
     WIDTH = 1920   # 1920, 1024, 800, 640                # Image width for processing
     HEIGHT = 1080  # 1080, 576, 450, 360                    # Image height for processing
 
@@ -101,14 +104,14 @@ if MODE == RUN_MODE.TRAIN:
 
     MULTIPLE_DATASETS = None    # "/mnt/morespace/3xM"           # Path to folder for training multiple models
     SKIP_DATASETS = ["3xM_Test_Datasets"]
-    NAME = 'mask_rcnn_rgbd'                 # Name of the model to use
+    NAME = 'mask_rcnn_rgb_TEST'                 # Name of the model to use
 
     USING_EXPERIMENT_TRACKING = True   # Enable experiment tracking
     CREATE_NEW_EXPERIMENT = True       # Whether to create a new experiment run
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
     NUM_EPOCHS = 100                    # Number of training epochs
-    LEARNING_RATE = 0.005             # Learning rate for the optimizer
+    LEARNING_RATE = 0.0001              # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
     DECAY = 0.0005                     # Weight decay for regularization
     BATCH_SIZE = 5                    # Batch size for training
@@ -124,7 +127,7 @@ if MODE == RUN_MODE.TRAIN:
     APPLY_RANDOM_SCALE = True
     APPLY_RANDOM_BACKGROUND_MODIFICATION = True
     
-    MASK_SCORE_THRESHOLD = 0.9
+    # MASK_SCORE_THRESHOLD = 0.9
 
 
 
@@ -134,9 +137,11 @@ if MODE == RUN_MODE.TRAIN:
 if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
 
-    IMG_DIR ='/mnt/morespace/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
-    DEPTH_DIR = '/mnt/morespace/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
-    MASK_DIR = '/mnt/morespace/3xM/3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
+    GROUND_PATH = "D:/3xM"    # "/mnt/morespace/3xM"
+    DATASET_NAME = "3xM_Dataset_160_80"
+    IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
+    DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
+    MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
     WIDTH = 1920   # 1920, 1024, 800, 640                # Image width for processing
     HEIGHT = 1080  # 1080, 576, 450, 360                    # Image height for processing
 
@@ -161,7 +166,7 @@ if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
     APPLY_RANDOM_SCALE = True
     APPLY_RANDOM_BACKGROUND_MODIFICATION = True
     
-    MASK_SCORE_THRESHOLD = 0.9
+    # MASK_SCORE_THRESHOLD = 0.9
     
 
 
@@ -173,9 +178,11 @@ if MODE == RUN_MODE.INFERENCE:
     MASK_SCORE_THRESHOLD = 0.9
     USE_DEPTH = True                   # Whether to include depth information -> as rgb and depth on green channel
 
-    IMG_DIR ='/mnt/morespace/3xM/3xM_Dataset_10_10/rgb'        # Directory for RGB images
-    DEPTH_DIR = '/mnt/morespace/3xM/3xM_Dataset_10_10/depth'  # Directory for depth-preprocessed images
-    MASK_DIR = '/mnt/morespace/3xM/3xM_Dataset_10_10/mask'    # Directory for mask-preprocessed images
+    GROUND_PATH = "D:/3xM"    # "/mnt/morespace/3xM"
+    DATASET_NAME = "3xM_Dataset_160_80"
+    IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
+    DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
+    MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
     WIDTH = 800                       # Image width for processing
     HEIGHT = 450                      # Image height for processing
 
@@ -206,7 +213,6 @@ if MODE == RUN_MODE.INFERENCE:
 ###########
 
 # basics
-import os
 from datetime import datetime, timedelta
 import time
 from IPython.display import clear_output
@@ -1039,6 +1045,7 @@ class Random_Background_Modification:
     
     def __call__(self, images):
         rgb_img, depth_img, mask_img = images
+        rgb_img, depth_img, mask_img = pil_to_cv2([rgb_img, depth_img, mask_img])
         
         if random.random() > 0.6:
             mode = random.choice(["noise", "checkerboard", "gradient pattern", "color shift"])
@@ -1075,8 +1082,8 @@ class Random_Background_Modification:
 
                 # create shift
                 add_B = np.full(B.shape, random.randint(10, 150), dtype=np.uint8)
-                add_G = np.full(G.shape, random.randint(10, 150), 100, dtype=np.uint8)
-                add_R = np.full(R.shape, random.randint(10, 150), 100, dtype=np.uint8)
+                add_G = np.full(G.shape, random.randint(10, 150), dtype=np.uint8)
+                add_R = np.full(R.shape, random.randint(10, 150), dtype=np.uint8)
                 
                 # make shift
                 shifted_B = cv2.add(B, add_B) if random.random() > 0.5 else cv2.subtract(B, add_B)
@@ -1103,7 +1110,11 @@ class Random_Background_Modification:
 
             # Overlay the generated pattern and the original objects
             result = cv2.add(background_with_pattern, objects_only)
+        else:
+            result = rgb_img
         
+        # Convert back to cv2
+        result, depth_img, mask_img = cv2_to_pil([result, depth_img, mask_img])
         return result, depth_img, mask_img
 
 
@@ -2790,7 +2801,7 @@ if __name__ == "__main__":
                 apply_random_gaussian_blur=APPLY_RANDOM_GAUSSIAN_BLUR,
                 apply_random_scale=APPLY_RANDOM_SCALE,
                 apply_random_background_modification=APPLY_RANDOM_BACKGROUND_MODIFICATION,
-                mask_score_threshold=MASK_SCORE_THRESHOLD
+                # mask_score_threshold=MASK_SCORE_THRESHOLD
             )
     elif MODE == RUN_MODE.HYPERPARAMETER_TUNING:
         print("Start Hyperparameter optimization...")
@@ -2820,7 +2831,8 @@ if __name__ == "__main__":
                                             apply_random_gaussian_blur=APPLY_RANDOM_GAUSSIAN_BLUR,
                                             apply_random_scale=APPLY_RANDOM_SCALE,
                                             apply_random_background_modification=APPLY_RANDOM_BACKGROUND_MODIFICATION,
-                                            mask_score_threshold=MASK_SCORE_THRESHOLD)
+                                            # mask_score_threshold=MASK_SCORE_THRESHOLD
+                                        )
                                     
         study = optuna.create_study(direction='minimize')
         study.optimize(partial_optimization_func, n_trials=20) 
