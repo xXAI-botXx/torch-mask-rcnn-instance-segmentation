@@ -112,7 +112,7 @@ if MODE == RUN_MODE.TRAIN:
 
     NUM_EPOCHS = 100                    # Number of training epochs
     LEARNING_RATE = 0.0001              # Learning rate for the optimizer
-    MOMENTUM = 0.9                     # Momentum for the optimizer
+    # MOMENTUM = 0.9                     # Momentum for the optimizer
     DECAY = 0.0005                     # Weight decay for regularization
     BATCH_SIZE = 5                    # Batch size for training
     SHUFFLE = True                     # Shuffle the data during training
@@ -153,7 +153,7 @@ if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
 
     NUM_WORKERS = 4                    # Number of workers for data loading
     BATCH_SIZE = 5
-    MOMENTUM = 0.9                     # Momentum for the optimizer
+    # MOMENTUM = 0.9                     # Momentum for the optimizer
     DECAY = 0.0005                     # Weight decay for regularization
     
     # Decide which Data Augmentation should be applied
@@ -229,6 +229,8 @@ from PIL import Image    # for PyTorch Transformations
 # deep learning
 import torch
 from torch.utils.data import Dataset, DataLoader
+from torch.optim import Adam    #, SGD
+from torch.optim.lr_scheduler import OneCycleLR
 
 import torchvision
 from torchvision.models.detection import MaskRCNN
@@ -1452,8 +1454,9 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     model = model.to(device)
 
     # Optimizer
-    params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.SGD(params, lr=learning_rate, momentum=momentum, weight_decay=decay)
+    # params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=decay)    # , momentum=momentum
+    schedular = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
 
     # Experiment Tracking
     if experiment_tracking:
@@ -1491,6 +1494,7 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                 optimizer.zero_grad()    # gradient to zero
                 losses.backward()        # create backward gradients
                 optimizer.step()         # adjust weights towards gradients
+                schedular.step()         # adjust learnrate
                 
                 if calc_metrics:
                     # Calc Metrics
@@ -2774,7 +2778,7 @@ if __name__ == "__main__":
                 weights_path=WEIGHTS_PATH,
                 num_epochs=NUM_EPOCHS,
                 learning_rate=LEARNING_RATE,
-                momentum=MOMENTUM,
+                # momentum=MOMENTUM,
                 decay=DECAY,
                 batch_size=BATCH_SIZE,
                 img_dir=img_path,
@@ -2813,7 +2817,7 @@ if __name__ == "__main__":
                                             mask_dir=MASK_DIR,
                                             num_workers=NUM_WORKERS,
                                             batch_size=BATCH_SIZE,
-                                            momentum=MOMENTUM,
+                                            # momentum=MOMENTUM,
                                             decay=DECAY,
                                             amount=AMOUNT,     # for random mode
                                             start_idx=START_IDX,    # for range mode
