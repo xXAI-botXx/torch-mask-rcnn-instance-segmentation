@@ -1461,7 +1461,7 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     # params = [p for p in model.parameters() if p.requires_grad]
     optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=decay)    # , momentum=momentum
     # schedular = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
-    schedular = CyclicLR(optimizer=optimizer, base_lr=learning_rate, max_lr=0.01, step_size_up=int((len(dataset)/batch_size)/2))
+    schedular = CyclicLR(optimizer=optimizer, base_lr=learning_rate, max_lr=0.001, step_size_up=int((len(dataset)/batch_size)/2))
 
     # Experiment Tracking
     if experiment_tracking:
