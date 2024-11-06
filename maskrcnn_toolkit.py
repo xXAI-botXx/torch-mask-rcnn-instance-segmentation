@@ -112,7 +112,7 @@ if MODE == RUN_MODE.TRAIN:
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
     NUM_EPOCHS = 100                    # Number of training epochs
-    LEARNING_RATE = 0.00001              # Learning rate for the optimizer
+    LEARNING_RATE = 1e-7              # Learning rate for the optimizer
     # MOMENTUM = 0.9                     # Momentum for the optimizer
     DECAY = 0.0005                     # Weight decay for regularization
     BATCH_SIZE = 5                    # Batch size for training
@@ -1509,7 +1509,7 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     #                  lr=learning_rate, 
     #                  weight_decay=decay)    # , momentum=momentum
     # scheduler = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
-    scheduler = CyclicLR(optimizer=optimizer, base_lr=learning_rate, max_lr=0.001, step_size_up=int((len(dataset)/batch_size)/2))
+    scheduler = CyclicLR(optimizer=optimizer, base_lr=learning_rate, max_lr=9e-5, step_size_up=int((len(dataset)/batch_size)/2))
 
     # Experiment Tracking
     if experiment_tracking:
