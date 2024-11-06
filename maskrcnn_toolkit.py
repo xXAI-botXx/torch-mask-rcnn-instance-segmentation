@@ -85,6 +85,7 @@ MODE = RUN_MODE.TRAIN
 if MODE == RUN_MODE.TRAIN:
     WEIGHTS_PATH = None  # Path to the model weights file
     USE_DEPTH = True                   # Whether to include depth information -> as rgb and depth on green channel
+    VERIFY_DATA = False         # True is recommended
 
     GROUND_PATH = "/mnt/morespace/3xM"   # "/mnt/morespace/3xM" "D:/3xM" 
     DATASET_NAME = "3xM_Dataset_80_80"
@@ -136,6 +137,7 @@ if MODE == RUN_MODE.TRAIN:
 # --------------------- #
 if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
+    VERIFY_DATA = False         # True is recommended
 
     GROUND_PATH = "D:/3xM"    # "/mnt/morespace/3xM"
     DATASET_NAME = "3xM_Dataset_160_80"
@@ -177,6 +179,7 @@ if MODE == RUN_MODE.INFERENCE:
     WEIGHTS_PATH = "./weights/mask_rcnn_rgbd_3xM_Dataset_80_80.pth"  # Path to the model weights file
     MASK_SCORE_THRESHOLD = 0.9
     USE_DEPTH = True                   # Whether to include depth information -> as rgb and depth on green channel
+    VERIFY_DATA = False         # True is recommended
 
     GROUND_PATH = "D:/3xM"    # "/mnt/morespace/3xM"
     DATASET_NAME = "3xM_Dataset_160_80"
@@ -262,7 +265,7 @@ from scipy.optimize import linear_sum_assignment
 
 def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
                   image_mean=[0.485, 0.456, 0.406, 0.5], image_std=[0.229, 0.224, 0.225, 0.5],    # from ImageNet
-                  min_size=1080, max_size=1920):
+                  min_size=1080, max_size=1920, log_path=None, should_log=False, should_print=True):
     """
     Load a Mask R-CNN model with a specified backbone and optional modifications.
 
@@ -320,6 +323,42 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
         
     if weights_path:
         model.load_state_dict(state_dict=torch.load(weights_path, weights_only=True)) 
+    
+    model_str = "Parameter of Mask R-CNN:"
+    model_parts = dict()
+    for name, param in model.named_parameters():
+        model_str += f"\n    - Parameter Name: {name}"
+        model_str += f"\n    - Parameter Shape: {param.shape}"
+        model_str += f"\n    - Requires Grad: {param.requires_grad}"
+        
+        if "backbone" in name:
+            model_str += f"\n    - Belongs to the Backbone\n"
+        elif "rpn" in name:
+            model_str += f"\n    - Belongs to the RPN\n"
+        elif "roi_heads" in name:
+            model_str += f"\n    - Belongs to the ROI Heads\n"
+        else:
+            model_str += f"\n    - Belongs to another part of the model\n"
+            
+        model_str += f"\n              {'-'*50}"
+        
+        # get model part
+        model_part_name_1 = name.split(".")[0]
+        model_part_name_2 = name.split(".")[1]
+        model_part_name = f"{model_part_name_1.upper()} - {model_part_name_2.upper()}"
+        if model_part_name in model_parts.keys():
+            model_parts[model_part_name] += 1
+        else:
+            model_parts[model_part_name] = 1
+            
+    model_str += "\n\nParameter Summary:"
+    for key, value in model_parts.items():
+        distance = 40 - len(f"    - {key}")
+        model_str += f"\n    - {key}{' '*distance}({value} parameters)"
+    model_str += f"\n{'-'*64}\n"
+    
+        
+    log(log_path, model_str, should_log=should_log, should_print=should_print)
     
     return model
 
@@ -398,7 +437,8 @@ class Dual_Dir_Dataset(Dataset):
                 width=1920,
                 height=1080,
                 should_print=True,
-                should_log=True
+                should_log=True,
+                should_verify=True
                 ):
 
         self.img_dir = img_dir
@@ -422,7 +462,8 @@ class Dual_Dir_Dataset(Dataset):
                                         data_mode=data_mode
                                         )
         
-        self.verify_data()
+        if should_verify:
+            self.verify_data()
 
         # update augmentations -> needed for background augmentation
         self.transform.update(bg_value=self.background_value)
@@ -1454,14 +1495,20 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     if should_log:
         log(log_path, "Create the model and preparing for training...")
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    model = load_maskrcnn(weights_path=weights_path, use_4_channels=use_depth, pretrained=False)
+    model = load_maskrcnn(weights_path=weights_path, use_4_channels=use_depth, pretrained=False, log_path=log_path, should_log=should_log, should_print=should_log)
     model = model.to(device)
 
     # Optimizer
     # params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=decay)    # , momentum=momentum
-    # schedular = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
-    schedular = CyclicLR(optimizer=optimizer, base_lr=learning_rate, max_lr=0.001, step_size_up=int((len(dataset)/batch_size)/2))
+    optimizer = Adam([
+                        {'params': model.backbone.parameters(), 'lr': 1e-5},  # Backbone with small learnrate
+                        {'params': model.rpn.parameters(), 'lr': 1e-4},       # RPN 
+                        {'params': model.roi_heads.parameters(), 'lr': 1e-3},  # ROI Heads
+                    ], 
+                     lr=learning_rate, 
+                     weight_decay=decay)    # , momentum=momentum
+    # scheduler = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
+    scheduler = CyclicLR(optimizer=optimizer, base_lr=learning_rate, max_lr=0.001, step_size_up=int((len(dataset)/batch_size)/2))
 
     # Experiment Tracking
     if experiment_tracking:
@@ -1482,6 +1529,7 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     if calc_metrics:
         eval_sum_dict = dict()
         eval_str = ""
+        learnrate_str = ""
 
     # Training
     if should_log:
@@ -1499,7 +1547,7 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                 optimizer.zero_grad()    # gradient to zero
                 losses.backward()        # create backward gradients
                 optimizer.step()         # adjust weights towards gradients
-                schedular.step()         # adjust learnrate
+                scheduler.step()         # adjust learnrate
                 
                 if calc_metrics:
                     # Calc Metrics
@@ -1535,7 +1583,30 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                     except Exception as e:
                         log(log_path, f"Error Occured during Metrics calculation: {e}", should_log=should_log, should_print=should_log)
                     model = model.train()
+                    
 
+                # get current learnrates
+                learnrate_str = "\nLearnrates:"
+                for param_group in optimizer.param_groups:
+                    # get group name
+                    parameter_name = None
+                    for param in param_group['params']:
+                        for name, p in model.named_parameters():
+                            if p is param:
+                                parameter_name = name.split(".")[0].upper()
+                                break
+                        if parameter_name is not None:
+                            break
+                    if parameter_name is None:
+                        parameter_name = "Unknown"
+                    learnrate_str += f"\n    - {parameter_name}: {param_group['lr']:.0e}"
+                    
+                    # make experiment tracking
+                    mlflow.log_metric(f"learnrate_{parameter_name}", param_group['lr'], step=iteration)
+
+                    # make tensorboard logging
+                    writer.add_scalar(f"learnrate_{parameter_name}", param_group['lr'], iteration)
+                    
                 # log loss avg
                 for key, value in loss_dict.items():
                     if experiment_tracking:
@@ -1589,6 +1660,8 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                         )
                         if calc_metrics:
                             log(log_path, eval_str, should_log=should_log, should_print=should_log)
+
+                        log(log_path, learnrate_str, should_log=should_log, should_print=should_log)
 
                     # reset
                     times = []
@@ -1683,7 +1756,8 @@ def train(
         apply_random_gaussian_blur=True,
         apply_random_scale=True,
         apply_random_background_modification=True,
-        mask_score_threshold=0.9
+        mask_score_threshold=0.9,
+        verify_data=True
     ):
     """
     Trains a Mask R-CNN model for instance segmentation using PyTorch.
@@ -1796,7 +1870,7 @@ def train(
     dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=augmentation, 
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
                                 data_mode=data_mode, use_mask=True, use_depth=use_depth, log_path=log_path,
-                                width=width, height=height, should_log=True, should_print=True)
+                                width=width, height=height, should_log=True, should_print=True, should_verify=verify_data)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, collate_fn=collate_fn)
 
     # Experiment Tracking
@@ -1905,7 +1979,8 @@ def hyperparameter_optimization(trial,
                                 apply_random_brightness_contrast=True,
                                 apply_random_gaussian_noise=True, 
                                 apply_random_gaussian_blur=True,
-                                apply_random_scale=True
+                                apply_random_scale=True,
+                                verify_data=True
                             ):
     now = datetime.now()
     print(f"    - Start next trial ({now.hour:02}:{now.minute:02} {now.day:02}.{now.month:02}.{now.year:04})")
@@ -1932,7 +2007,7 @@ def hyperparameter_optimization(trial,
     dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=augmentation, 
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
                                 data_mode=data_mode, use_mask=True, use_depth=use_depth, log_path=None,
-                                width=width, height=height, should_log=True, should_print=True)
+                                width=width, height=height, should_log=True, should_print=True, should_verify=verify_data)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
 
     # Call training function
@@ -2597,7 +2672,8 @@ def inference(
         height=1080,
         mask_threshold=0.9,
         show_insights=False,
-        save_insights=True
+        save_insights=True,
+        verify_data=True
     ):
     """
     Perform inference using a Mask R-CNN model with the provided dataset and parameters, while also
@@ -2649,7 +2725,7 @@ def inference(
     dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=Inference_Augmentations(width=width, height=height), 
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
                                 data_mode=data_mode, use_mask=use_mask, use_depth=use_depth, log_path=None,
-                                width=width, height=height, should_log=False, should_print=True)
+                                width=width, height=height, should_log=False, should_print=True, should_verify=verify_data)
     data_loader = DataLoader(dataset, batch_size=1, num_workers=num_workers, collate_fn=collate_fn)
 
     all_images_size = len(data_loader)
@@ -2660,7 +2736,7 @@ def inference(
 
     with torch.no_grad():
         # create model
-        model = load_maskrcnn(weights_path=weights_path, use_4_channels=use_depth, pretrained=False)
+        model = load_maskrcnn(weights_path=weights_path, use_4_channels=use_depth, pretrained=False, log_path=None, should_log=False, should_print=False)
         model.eval()
         model = model.to(device)
 
@@ -2874,7 +2950,8 @@ if __name__ == "__main__":
                 apply_random_gaussian_blur=APPLY_RANDOM_GAUSSIAN_BLUR,
                 apply_random_scale=APPLY_RANDOM_SCALE,
                 apply_random_background_modification=APPLY_RANDOM_BACKGROUND_MODIFICATION,
-                # mask_score_threshold=MASK_SCORE_THRESHOLD
+                # mask_score_threshold=MASK_SCORE_THRESHOLD,
+                verify_data=VERIFY_DATA
             )
     elif MODE == RUN_MODE.HYPERPARAMETER_TUNING:
         print("Start Hyperparameter optimization...")
@@ -2905,6 +2982,7 @@ if __name__ == "__main__":
                                             apply_random_scale=APPLY_RANDOM_SCALE,
                                             apply_random_background_modification=APPLY_RANDOM_BACKGROUND_MODIFICATION,
                                             # mask_score_threshold=MASK_SCORE_THRESHOLD
+                                            verify_data=VERIFY_DATA
                                         )
                                     
         study = optuna.create_study(direction='minimize')
@@ -2944,7 +3022,8 @@ if __name__ == "__main__":
                 height=HEIGHT,
                 mask_threshold=MASK_SCORE_THRESHOLD,
                 show_insights=SHOW_INSIGHTS,
-                save_insights=SAVE_INSIGHTS
+                save_insights=SAVE_INSIGHTS,
+                verify_data=VERIFY_DATA
         )
     
     
