@@ -1513,9 +1513,11 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
 
     # Experiment Tracking
     if experiment_tracking:
-        # Add model for tracking -> doesn't work
-        # if using_experiment_tracking:
-        #     mlflow.pytorch.log_model(model, "model")
+        # Add model for tracking
+        # batch = next(iter(data_loader))
+        # images, target, _ = batch
+        # single_example = torch.zeros_like(images[0]).tolist()
+        mlflow.pytorch.log_model(model, "Mask R-CNN", conda_env="./conda_env.yml")    # , input_example=single_example)
 
         # Init TensorBoard writer
         writer = SummaryWriter()
@@ -1587,26 +1589,30 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                     
 
                 # get current learnrates
-                learnrate_str = "\nLearnrates:"
-                for param_group in optimizer.param_groups:
-                    # get group name
-                    parameter_name = None
-                    for param in param_group['params']:
-                        for name, p in model.named_parameters():
-                            if p is param:
-                                parameter_name = name.split(".")[0].upper()
+                learnrate_str = "\nLearnrate:"
+                if len(optimizer.param_groups) > 1:
+                    for param_group in optimizer.param_groups:
+                        # get group name
+                        parameter_name = None
+                        for param in param_group['params']:
+                            for name, p in model.named_parameters():
+                                if p is param:
+                                    parameter_name = name.split(".")[0].upper()
+                                    break
+                            if parameter_name is not None:
                                 break
-                        if parameter_name is not None:
-                            break
-                    if parameter_name is None:
-                        parameter_name = "Unknown"
-                    learnrate_str += f"\n    - {parameter_name}: {param_group['lr']:.0e}"
+                        if parameter_name is None:
+                            parameter_name = "Unknown"
+                        learnrate_str += f"\n    - {parameter_name}: {param_group['lr']:.0e}"
                     
-                    # make experiment tracking
                     mlflow.log_metric(f"learnrate_{parameter_name}", param_group['lr'], step=iteration)
-
-                    # make tensorboard logging
                     writer.add_scalar(f"learnrate_{parameter_name}", param_group['lr'], iteration)
+                else:
+                    # current_learnrate = scheduler.get_lst_lr()[0]
+                    current_learnrate = optimizer.param_groups[0]['lr']
+                    learnrate_str += f" {current_learnrate:.0e}"
+                    mlflow.log_metric(f"learnrate", current_learnrate, step=iteration)
+                    writer.add_scalar(f"learnrate", current_learnrate, iteration)
                     
                 # log loss avg
                 for key, value in loss_dict.items():
@@ -1911,7 +1917,7 @@ def train(
                 mlflow.log_param("name", NAME)
                 mlflow.log_param("epochs", num_epochs)
                 mlflow.log_param("batch_size", batch_size)
-                mlflow.log_param("learning_rate", learning_rate)
+                mlflow.log_param("learnrate", learning_rate)
                 mlflow.log_param("momentum", momentum)
                 mlflow.log_param("decay", decay)
 
