@@ -1514,6 +1514,7 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     # Optimizer
     # params = [p for p in model.parameters() if p.requires_grad]
     optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
+    optimizer_name = "adam"
     
     # scheduler = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
     scheduler = CyclicLR(optimizer=optimizer, base_lr=learning_rate, max_lr=5e-4, step_size_up=int((len(dataset)/batch_size)/2)) 
@@ -1638,11 +1639,12 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                 cur_total_loss = sum([value.cpu().detach().numpy() for value in loss_dict.values()])
 
                 # update optimizer and scheduler if near the goal
-                if cur_total_loss < 0.45:
+                if cur_total_loss < 0.45 and optimizer_name == "adam":
                     log(log_path, "\nTrain Update: Switched Optimizer from Adam to SGD\n", should_log=should_log, should_print=should_log)
                     optimizer = SGD(params=model.parameters(), lr=learning_rate, momentum=momentum, weight_decay=decay)
                     scheduler = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
-                
+                    optimizer_name = "sgd"
+
                 if experiment_tracking:
                     # make experiment tracking
                     mlflow.log_metric("total loss", cur_total_loss, step=iteration)
