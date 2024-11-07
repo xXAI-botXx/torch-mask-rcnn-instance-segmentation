@@ -87,7 +87,7 @@ if MODE == RUN_MODE.TRAIN:
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
 
-    GROUND_PATH = "/mnt/morespace/3xM"   # "/mnt/morespace/3xM" "D:/3xM" 
+    GROUND_PATH = "D:/3xM"    # "/mnt/morespace/3xM" "D:/3xM" 
     DATASET_NAME = "3xM_Dataset_160_80"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
@@ -112,7 +112,7 @@ if MODE == RUN_MODE.TRAIN:
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
     NUM_EPOCHS = 20                    # Number of training epochs
-    LEARNING_RATE = 8e-4              # Learning rate for the optimizer
+    LEARNING_RATE = 5e-6              # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
     DECAY = 0.0005                     # Weight decay for regularization
     BATCH_SIZE = 5                    # Batch size for training
@@ -1515,8 +1515,8 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     # params = [p for p in model.parameters() if p.requires_grad]
     optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
     
-    scheduler = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
-    # scheduler = CyclicLR(optimizer=optimizer, base_lr=learning_rate, max_lr=9e-5, step_size_up=int(len(dataset)))# int((len(dataset)/batch_size)/2))
+    # scheduler = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
+    scheduler = CyclicLR(optimizer=optimizer, base_lr=learning_rate, max_lr=5e-4, step_size_up=int((len(dataset)/batch_size)/2)) 
 
     # Experiment Tracking
     if experiment_tracking:
@@ -2927,9 +2927,9 @@ if __name__ == "__main__":
 
         for cur_dataset in datasets:
             if MULTIPLE_DATASETS is not None:
-                img_folder_name = IMG_DIR.split("/")[-1]
-                depth_folder_name = DEPTH_DIR.split("/")[-1]
-                mask_folder_name = MASK_DIR.split("/")[-1]
+                img_folder_name = "rgb" # IMG_DIR.split("/")[-1]
+                depth_folder_name = "depth" # DEPTH_DIR.split("/")[-1]
+                mask_folder_name = "mask" # MASK_DIR.split("/")[-1]
                 
                 name = f"{NAME}_{cur_dataset}"
                 img_path = os.path.join(MULTIPLE_DATASETS, cur_dataset, img_folder_name)
