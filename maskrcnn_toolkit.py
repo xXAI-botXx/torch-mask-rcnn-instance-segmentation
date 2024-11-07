@@ -84,11 +84,11 @@ MODE = RUN_MODE.TRAIN
 # -------- #
 if MODE == RUN_MODE.TRAIN:
     WEIGHTS_PATH = None  # Path to the model weights file
-    USE_DEPTH = True                   # Whether to include depth information -> as rgb and depth on green channel
+    USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
 
-    GROUND_PATH = "/mnt/morespace/3xM"    # "/mnt/morespace/3xM" "D:/3xM" 
-    DATASET_NAME = "3xM_Dataset_80_80"
+    GROUND_PATH = "D:/3xM"    # "/mnt/morespace/3xM" "D:/3xM" 
+    DATASET_NAME = "3xM_Dataset_160_80"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
     MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
@@ -105,15 +105,15 @@ if MODE == RUN_MODE.TRAIN:
 
     MULTIPLE_DATASETS = None    # "/mnt/morespace/3xM"           # Path to folder for training multiple models
     SKIP_DATASETS = ["3xM_Test_Datasets"]
-    NAME = 'mask_rcnn_rgbd_TEST_cycle'                 # Name of the model to use
+    NAME = 'mask_rcnn_rgb_TEST_SGD_Optimizer_OneCircle_Scheduler'                 # Name of the model to use
 
     USING_EXPERIMENT_TRACKING = True   # Enable experiment tracking
     CREATE_NEW_EXPERIMENT = True       # Whether to create a new experiment run
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
     NUM_EPOCHS = 100                    # Number of training epochs
-    LEARNING_RATE = 1e-7              # Learning rate for the optimizer
-    # MOMENTUM = 0.9                     # Momentum for the optimizer
+    LEARNING_RATE = 8e-4              # Learning rate for the optimizer
+    MOMENTUM = 0.9                     # Momentum for the optimizer
     DECAY = 0.0005                     # Weight decay for regularization
     BATCH_SIZE = 5                    # Batch size for training
     SHUFFLE = True                     # Shuffle the data during training
@@ -155,7 +155,7 @@ if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
 
     NUM_WORKERS = 4                    # Number of workers for data loading
     BATCH_SIZE = 5
-    # MOMENTUM = 0.9                     # Momentum for the optimizer
+    MOMENTUM = 0.9                     # Momentum for the optimizer
     DECAY = 0.0005                     # Weight decay for regularization
     
     # Decide which Data Augmentation should be applied
@@ -225,6 +225,7 @@ import time
 from IPython.display import clear_output
 from functools import partial
 import statistics
+import queue
 
 # image
 import random
@@ -236,7 +237,7 @@ from PIL import Image    # for PyTorch Transformations
 # deep learning
 import torch
 from torch.utils.data import Dataset, DataLoader
-from torch.optim import Adam    #, SGD
+from torch.optim import Adam, SGD
 from torch.optim.lr_scheduler import OneCycleLR, CyclicLR
 
 import torchvision
@@ -930,17 +931,20 @@ def collate_fn(batch):
 
 # Custom Transformations
 class Random_Flip:
+    def __init__(self, probability=0.05):
+        self.probability = probability
+
     def __call__(self, images):
         rgb_img, depth_img, mask_img = images
         
-        if random.random() > 0.6:
+        if random.random() < self.probability:
             # Horizontal Flipping
             rgb_img = T.functional.hflip(rgb_img)
             if depth_img is not None:
                 depth_img = T.functional.hflip(depth_img)
             if mask_img is not None:
                 mask_img = T.functional.hflip(mask_img)
-        if random.random() > 0.6:
+        if random.random() < self.probability:
             # Vertical Flipping
             rgb_img = T.functional.vflip(rgb_img)
             if depth_img is not None:
@@ -952,13 +956,14 @@ class Random_Flip:
 
 
 class Random_Rotation:
-    def __init__(self, max_angle=30):
+    def __init__(self, max_angle=30, probability=0.05):
         self.max_angle = max_angle
+        self.probability = probability
     
     def __call__(self, images):
         rgb_img, depth_img, mask_img = images
         
-        if random.random() > 0.6:
+        if random.random() < self.probability:
             angle = random.uniform(-self.max_angle, self.max_angle)
             rgb_img = T.functional.rotate(rgb_img, angle)
             if depth_img is not None:
@@ -970,15 +975,16 @@ class Random_Rotation:
 
 
 class Random_Crop:
-    def __init__(self, min_crop_size, max_crop_size):
+    def __init__(self, min_crop_size, max_crop_size, probability=0.05):
         # min_crop_size und max_crop_size sind Tupel (min_h, min_w), (max_h, max_w)
         self.min_crop_size = min_crop_size
         self.max_crop_size = max_crop_size
+        self.probability = probability
     
     def __call__(self, images):
         rgb_img, depth_img, mask_img = images
         
-        if random.random() > 0.7:
+        if random.random() < self.probability:
             # random crop-size
             random_h = random.randint(self.min_crop_size[0], self.max_crop_size[0])
             random_w = random.randint(self.min_crop_size[1], self.max_crop_size[1])
@@ -999,14 +1005,15 @@ class Random_Crop:
 
 
 class Random_Brightness_Contrast:
-    def __init__(self, brightness_range=0.2, contrast_range=0.2):
+    def __init__(self, brightness_range=0.2, contrast_range=0.2, probability=0.05):
         self.brightness = brightness_range
         self.contrast = contrast_range
+        self.probability = probability
 
     def __call__(self, images):
         rgb_img, depth_img, mask_img = images
         
-        if random.random() > 0.6:
+        if random.random() < self.probability:
             brightness_factor = random.uniform(1 - self.brightness, 1 + self.brightness)
             contrast_factor = random.uniform(1 - self.contrast, 1 + self.contrast)
             rgb_img = T.functional.adjust_brightness(rgb_img, brightness_factor)
@@ -1017,9 +1024,10 @@ class Random_Brightness_Contrast:
 
 
 class Add_Gaussian_Noise:
-    def __init__(self, mean=0, std=0.01):
+    def __init__(self, mean=0, std=0.01, probability=0.05):
         self.mean = mean
         self.std = std
+        self.probability = probability
     
     def __call__(self, images):
         rgb_img, depth_img, mask_img = images
@@ -1028,7 +1036,7 @@ class Add_Gaussian_Noise:
         rgb_img_np = np.array(rgb_img)
         
         # Apply Gaussian noise to RGB image
-        if random.random() > 0.6:
+        if random.random() < self.probability:
             noise_rgb = np.random.randn(*rgb_img_np.shape) * self.std + self.mean
             rgb_img_np = np.clip(rgb_img_np + noise_rgb, 0, 255).astype(np.uint8)
         
@@ -1036,7 +1044,7 @@ class Add_Gaussian_Noise:
         rgb_img = Image.fromarray(rgb_img_np)
 
         # Handle depth image if it's not None
-        if random.random() > 0.6 and depth_img is not None:
+        if random.random() < self.probability and depth_img is not None:
             depth_img_np = np.array(depth_img)
             noise_depth = np.random.randn(*depth_img_np.shape) * self.std + self.mean
             depth_img_np = np.clip(depth_img_np + noise_depth, 0, 255).astype(np.uint8)
@@ -1046,14 +1054,15 @@ class Add_Gaussian_Noise:
 
 
 class Random_Gaussian_Blur:
-    def __init__(self, kernel_size=5, sigma=(0.1, 2.0)):
+    def __init__(self, kernel_size=5, sigma=(0.1, 2.0), probability=0.05):
         self.kernel_size = kernel_size
         self.sigma = sigma
+        self.probability = probability
 
     def __call__(self, images):
         rgb_img, depth_img, mask_img = images
         
-        if random.random() > 0.95:
+        if random.random() < self.probability:
             sigma = random.uniform(*self.sigma)
             rgb_img = T.GaussianBlur(kernel_size=self.kernel_size, sigma=sigma)(rgb_img)
             if depth_img is not None:
@@ -1064,13 +1073,14 @@ class Random_Gaussian_Blur:
 
 
 class Random_Scale:
-    def __init__(self, scale_range=(0.8, 1.2)):
+    def __init__(self, scale_range=(0.8, 1.2), probability=0.05):
         self.scale_range = scale_range
+        self.probability = probability
     
     def __call__(self, images):
         rgb_img, depth_img, mask_img = images
         
-        if random.random() > 0.6:
+        if random.random() < self.probability:
             scale_factor = random.uniform(self.scale_range[0], self.scale_range[1])
             h, w = rgb_img.size[-2:]
             new_size = (int(h * scale_factor), int(w * scale_factor))
@@ -1085,16 +1095,17 @@ class Random_Scale:
 
 
 class Random_Background_Modification:
-    def __init__(self, bg_value=1, width=1920, height=1080):
+    def __init__(self, bg_value=1, width=1920, height=1080, probability=0.05):
         self.bg_value = bg_value
         self.width = width
         self.height = height
+        self.probability = probability
     
     def __call__(self, images):
         rgb_img, depth_img, mask_img = images
         rgb_img, depth_img, mask_img = pil_to_cv2([rgb_img, depth_img, mask_img])
         
-        if random.random() > 0.6:
+        if random.random() < self.probability:
             mode = random.choice(["noise", "checkerboard", "gradient pattern", "color shift"])
 
             if mode == "noise":
@@ -1340,6 +1351,8 @@ def pil_to_cv2(images:list):
 # training #
 ############
 
+
+
 def log(file_path, content, reset_logs=False, should_log=True, should_print=True):
     """
     Logs content to a specified file and optionally prints it to the console.
@@ -1501,15 +1514,9 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
     # Optimizer
     # params = [p for p in model.parameters() if p.requires_grad]
     optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
-    # optimizer = Adam([
-    #                     {'params': model.backbone.parameters(), 'lr': 1e-5},  # Backbone with small learnrate
-    #                     {'params': model.rpn.parameters(), 'lr': 1e-4},       # RPN 
-    #                     {'params': model.roi_heads.parameters(), 'lr': 1e-3},  # ROI Heads
-    #                 ], 
-    #                  lr=learning_rate, 
-    #                  weight_decay=decay)    # , momentum=momentum
-    # scheduler = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
-    scheduler = CyclicLR(optimizer=optimizer, base_lr=learning_rate, max_lr=9e-5, step_size_up=int((len(dataset)/batch_size)/2))
+    
+    scheduler = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
+    # scheduler = CyclicLR(optimizer=optimizer, base_lr=learning_rate, max_lr=9e-5, step_size_up=int(len(dataset)))# int((len(dataset)/batch_size)/2))
 
     # Experiment Tracking
     if experiment_tracking:
@@ -1629,9 +1636,14 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                         loss_avgs[key] = [value.cpu().detach().numpy()]
 
                 cur_total_loss = sum([value.cpu().detach().numpy() for value in loss_dict.values()])
+
+                # update optimizer and scheduler if near the goal
+                if cur_total_loss < 0.45:
+                    log(log_path, "\nTrain Update: Switched Optimizer from Adam to SGD\n", should_log=should_log, should_print=should_log)
+                    optimizer = SGD(params=model.parameters(), lr=learning_rate, momentum=momentum, weight_decay=decay)
+                    scheduler = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
                 
                 if experiment_tracking:
-
                     # make experiment tracking
                     mlflow.log_metric("total loss", cur_total_loss, step=iteration)
 
@@ -2930,7 +2942,7 @@ if __name__ == "__main__":
                 weights_path=WEIGHTS_PATH,
                 num_epochs=NUM_EPOCHS,
                 learning_rate=LEARNING_RATE,
-                # momentum=MOMENTUM,
+                momentum=MOMENTUM,
                 decay=DECAY,
                 batch_size=BATCH_SIZE,
                 img_dir=img_path,
@@ -2970,7 +2982,7 @@ if __name__ == "__main__":
                                             mask_dir=MASK_DIR,
                                             num_workers=NUM_WORKERS,
                                             batch_size=BATCH_SIZE,
-                                            # momentum=MOMENTUM,
+                                            momentum=MOMENTUM,
                                             decay=DECAY,
                                             amount=AMOUNT,     # for random mode
                                             start_idx=START_IDX,    # for range mode
