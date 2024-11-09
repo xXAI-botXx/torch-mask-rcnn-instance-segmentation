@@ -87,7 +87,7 @@ if MODE == RUN_MODE.TRAIN:
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
 
-    GROUND_PATH = "D:/3xM"    # "/mnt/morespace/3xM" "D:/3xM" 
+    GROUND_PATH = "/mnt/morespace/3xM"    # "/mnt/morespace/3xM" "D:/3xM" 
     DATASET_NAME = "3xM_Dataset_160_80"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
@@ -105,7 +105,7 @@ if MODE == RUN_MODE.TRAIN:
 
     MULTIPLE_DATASETS = GROUND_PATH         # Path to folder for training multiple models
     SKIP_DATASETS = ["3xM_Test_Datasets"]
-    NAME = 'mask_rcnn_rgb'                 # Name of the model to use
+    NAME = 'mask_rcnn_rgb_nms_loss_weights'                 # Name of the model to use
 
     USING_EXPERIMENT_TRACKING = True   # Enable experiment tracking
     CREATE_NEW_EXPERIMENT = True       # Whether to create a new experiment run
@@ -176,23 +176,23 @@ if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
 # INFERENCE #
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
-    WEIGHTS_PATH = "./weights/mask_rcnn_rgbd_3xM_Dataset_80_80.pth"  # Path to the model weights file
-    MASK_SCORE_THRESHOLD = 0.9
-    USE_DEPTH = True                   # Whether to include depth information -> as rgb and depth on green channel
+    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_80_80_epoch_015.pth"  # Path to the model weights file
+    MASK_SCORE_THRESHOLD = 0.5
+    USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
 
-    GROUND_PATH = "D:/3xM"    # "/mnt/morespace/3xM"
-    DATASET_NAME = "3xM_Dataset_160_80"
+    GROUND_PATH = "/mnt/morespace/3xM"   # "/mnt/morespace/3xM"
+    DATASET_NAME = "3xM_Dataset_80_80"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
     MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
-    WIDTH = 800                       # Image width for processing
-    HEIGHT = 450                      # Image height for processing
+    WIDTH = 1920                       # Image width for processing
+    HEIGHT = 1080                      # Image height for processing
 
-    DATA_MODE = DATA_LOADING_MODE.SINGLE  # Mode for loading data -> All, Random, Range, Single Image
+    DATA_MODE = DATA_LOADING_MODE.RANGE  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 10                       # Number of images for random mode
     START_IDX = 0                      # Starting index for range mode
-    END_IDX = 9                       # Ending index for range mode
+    END_IDX = 0                       # Ending index for range mode
     IMAGE_NAME = "3xM_0_10_10.png"     # Specific image name for single mode
 
     NUM_WORKERS = 4                    # Number of workers for data loading
@@ -224,8 +224,10 @@ from datetime import datetime, timedelta
 import time
 from IPython.display import clear_output
 from functools import partial
+import math
 import statistics
 import queue
+from collections import OrderedDict
 
 # image
 import random
@@ -322,6 +324,21 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
         #       - Replace the transform in the model with a custom one
         model.transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
         
+    # adjust loss weights
+    model.rpn.rpn_cls_loss_weight = 1.0
+    model.rpn.rpn_bbox_loss_weight = 1.5
+    model.roi_heads.mask_loss_weight = 1.5
+    model.roi_heads.box_loss_weight = 1.0
+    model.roi_heads.classification_loss_weight = 1.0
+    
+    # adjust non-maximum suppression
+    model.roi_heads.nms_thresh = 0.4
+    model.roi_heads.box_predictor.nms_thresh = 0.6  # Higher NMS threshold for fewer boxes
+    model.roi_heads.mask_predictor.mask_nms_thresh = 0.6  # Higher threshold for fewer overlapping masks
+    model.roi_heads.score_thresh = 0.5  # Increase the threshold for lower-confidence masks
+
+        
+    # load weights
     if weights_path:
         model.load_state_dict(state_dict=torch.load(weights_path, weights_only=True)) 
     
@@ -484,6 +501,8 @@ class Dual_Dir_Dataset(Dataset):
 
         # Load the RGB Image, Depth Image and the Gray Mask (and make sure that the size is right)
         image = cv2.imread(img_path)
+        if image is None:
+            raise FileNotFoundError(f"Error during data loading: there is no '{img_path}'")
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         # image = resize_with_padding(image, target_h=self.height, target_w=self.width, method=cv2.INTER_LINEAR)
         
@@ -2073,53 +2092,238 @@ DNN_INSIGHTS = {}
 
 def register_hook(layer, layer_name):
     def hook(module, input, output):
-        DNN_INSIGHTS[layer_name] = output.detach().cpu()
+        try:
+            new_dict = extract_torch_tensor_layer_as_dict(output, layer_name, i=0)
+            DNN_INSIGHTS.update(new_dict)
+            
+            # if type(output) == tuple:
+            #     try:
+            #         layer_values = tuple()
+            #         for v in output:
+            #             if type(v) == list:
+            #                 for sub_v in v:
+            #                     if type(sub_v) == torch.Tensor:
+            #                         layer_values += (sub_v.detach().cpu(), )
+            #                     else:
+            #                         raise ValueError(f"Wrong subsubtype in insight: {type(sub_v)}")
+            #             elif type(v) == torch.Tensor:
+            #                 layer_values += (v.detach().cpu(), )
+            #             else:
+            #                 raise ValueError(f"Wrong subtype in insight: {type(v)}")
+            #         DNN_INSIGHTS[layer_name] = layer_values
+            #     except Exception as e:
+            #         print("LEN:", len(output[0]))
+            #         raise e
+            # elif type(output) == torch.Tensor:
+            #     DNN_INSIGHTS[layer_name] = output.detach().cpu()
+            # else:
+            #     DNN_INSIGHTS[layer_name] = {k: v.detach().cpu() for k, v in output.items()} # output.detach().cpu()
+        except:
+            print(f"Error because dtype {type(output)} in register_hook")
+            print(output)
+            # for k, v in output.items():
+            #     print(f"k: {k}, v: {v}")
+            raise Exception("Exception")
     layer.register_forward_hook(hook)
 
 
 
 def register_maskrcnn_hooks(model):
     # register_hook(model.fpn.layer2, "fpn.layer2")
-    register_hook(model.fpn, "fpn")
-    register_hook(model.rpn, "rpn")
-    register_hook(model.roi_heads.box_roi_pool, "roi_aligns")
+    register_hook(model.backbone.body, "resnet")
+    register_hook(model.backbone.fpn, "fpn")
+    register_hook(model.rpn.head, "rpn")
+    register_hook(model.roi_heads.mask_head[0], "roi_align")
+    register_hook(model.roi_heads.box_head, "box_head")
+    register_hook(model.roi_heads.box_predictor, "box_predictor")
+    register_hook(model.roi_heads.mask_head, "mask_head")
+    register_hook(model.roi_heads.mask_predictor, "mask_predictor")
 
 
 
-def visualize_insights(insights:dict, should_save, save_path, name, should_show):
-    for layer_name, insight in insights.items():
-        # insight = insight[0]
-        # n_chnneös = insight.shape[0]
+def extract_torch_tensor_layer_as_dict(layer_content, layer_name, i=0):
+    if isinstance(layer_content, OrderedDict):
+        layer_content = dict(layer_content)
         
-        # choose a subset to show
-        n_channels = insight.size(1)
-        n_images = min(4, n_channels)
+    if isinstance(layer_content, (tuple, list)):
+        result_dict = {}
+        for idx, sub_content in enumerate(layer_content):
+            cur_res = extract_torch_tensor_layer_as_dict(sub_content, f"{layer_name}_{idx}", i)
+            result_dict.update(cur_res)  # Combine cur_res with existing dict
+        return result_dict
+    
+    elif isinstance(layer_content, torch.Tensor):
+        i += 1
+        return {f"{layer_name}_{i}": layer_content}
+    
+    elif isinstance(layer_content, dict):
+        result_dict = {}
+        for sub_name, sub_content in layer_content.items():
+            cur_res = extract_torch_tensor_layer_as_dict(sub_content, f"{layer_name}_{sub_name}", i)
+            result_dict.update(cur_res)  # Combine cur_res with existing dict
+        return result_dict
+    
+    else:
+        raise ValueError(f"Type is not supported: {type(layer_content)}")
 
-        fig, ax = plt.subplots(ncols=1, nrows=n_images, figsize=(20*n_images, 15))
-        fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.1, hspace=0.1)
+
+
+def visualize_insights(insights, should_save, save_path, name, should_show, max_aspect_ratio=5.0, max_cols=3, channel_limit=3, batch_limit=1):
+    # standardize type
+    # print(type(insights))
+    insights_dict = insights
+    
+    # To GPU
+    insights_dict = {k: v.detach().cpu() for k, v in insights_dict.items()}
+    
+    for layer_name, insight in insights_dict.items():
+        if type(insight) != torch.Tensor and type(insight) !=  np.array:
+            print(f"Insight Visualizer: Can't visualize type '{type(insight)}'.")    # Value: {insight}")
+            # for i in insight:
+                # print(type(i))
+                # print(i)
+            continue
         
-        for i in range(n_images):
-            # plot cur insight
-            if n_images > 1:
-                ax[i].imshow(insight[i].cpu().numpy(), cmap="viridis")
-                ax[i].set_title(f"{layer_name} - Channel: {i+1}")
-                ax[i].axis("off")
+        # choose a subset to show -> PyTorch: (batch_size, channels, height, width)
+        if len(insight.size()) == 2:
+            
+            height = insight.shape[0]
+            width = insight.shape[1]
+            insight_prep = insight.cpu().numpy()
+            # crop if width and height are too different, to make it better visible
+            if width / height > max_aspect_ratio:
+                # Zu breit -> Breite beschneiden
+                new_width = int(height * max_aspect_ratio)
+                left_margin = (width - new_width) // 2
+                insight_prep = insight[:, left_margin:left_margin + new_width]
+            elif height / width > max_aspect_ratio:
+                # height too high
+                new_height = int(width * max_aspect_ratio)
+                top_margin = (height - new_height) // 2
+                insight_prep = insight[top_margin:top_margin + new_height, :]
             else:
-                ax.imshow(insight[i].cpu().numpy(), cmap="viridis")
-                ax.set_title(f"{layer_name} - Channel: {i+1}")
+                # in ratio 
+                insight_prep = insight[:, :]
+            
+            fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(20, 15))
+            fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.1, hspace=0.1)
+            
+            # ax.imshow(insight.cpu().numpy()[:height, :width], cmap="viridis")
+            ax.imshow(insight_prep, cmap="viridis")
+            ax.set_title(f"Feature-Map: {layer_name}")
+            ax.axis("off")
+
+            if should_save:
+                plt.savefig(os.path.join(save_path, f"{layer_name}_{name}.jpg"), dpi=fig.dpi)
+
+            if should_show:
+                print("\nShowing Ground Truth Visualization*")
+                plt.show()
+            else:
+                plt.clf()
+                plt.close(fig)
+        elif len(insight.shape) == 3:
+            # 3D Tensor: visualize each channel separately
+            
+            height = insight.shape[1]
+            width = insight.shape[2]
+            insight_prep = insight.cpu().numpy()
+            # crop if width and height are too different, to make it better visible
+            if width / height > max_aspect_ratio:
+                # Zu breit -> Breite beschneiden
+                new_width = int(height * max_aspect_ratio)
+                left_margin = (width - new_width) // 2
+                insight_prep = insight[:, :, left_margin:left_margin + new_width]
+            elif height / width > max_aspect_ratio:
+                # height too high
+                new_height = int(width * max_aspect_ratio)
+                top_margin = (height - new_height) // 2
+                insight_prep = insight[:, top_margin:top_margin + new_height, :]
+            else:
+                # in ratio 
+                insight_prep = insight
+            
+            channels = insight.shape[0]
+            if channel_limit is not None:
+                    channels = min(channel_limit, channels)
+                    
+            fig, axes = plt.subplots(1, channels, figsize=(20, 15))
+            for i in range(channels):
+                ax = axes[i] if channels > 1 else axes
+                # ax.imshow(insight[i, :height, :width], cmap="viridis")
+                ax.imshow(insight_prep[i, :, :], cmap="viridis")
+                ax.set_title(f"{layer_name} Ch. {i+1}")
                 ax.axis("off")
+            if should_save:
+                plt.savefig(os.path.join(save_path, f"{layer_name}_{name}.jpg"), dpi=fig.dpi)
+            if should_show:
+                plt.show()
+            else:
+                plt.clf()
+                plt.close(fig)
 
-        plt.suptitle(f"Feature-Map: {layer_name}")
+        elif len(insight.shape) == 4:
+            # 4D Tensor: interpret as (batch, height, width, channels)
+            batch_size, height, width, channels = insight.shape
+            
+            height = insight.shape[1]
+            width = insight.shape[2]
+            insight_prep = insight.cpu().numpy()
+            # crop if width and height are too different, to make it better visible
+            if width / height > max_aspect_ratio:
+                # Zu breit -> Breite beschneiden
+                new_width = int(height * max_aspect_ratio)
+                left_margin = (width - new_width) // 2
+                insight_prep = insight[:, :, left_margin:left_margin + new_width, :]
+            elif height / width > max_aspect_ratio:
+                # height too high
+                new_height = int(width * max_aspect_ratio)
+                top_margin = (height - new_height) // 2
+                insight_prep = insight[:, top_margin:top_margin + new_height, :, :]
+            else:
+                # in ratio 
+                insight_prep = insight
+            
+            for batch_idx in range(batch_size):
+                if batch_idx >= batch_limit:
+                    break
+                
+                if channel_limit is not None:
+                    channels = min(channel_limit, channels)
+                    
+                if max_cols is not None:
+                    cols =  max(1, math.ceil(max_cols))
+                    rows =  max(1, math.ceil(channels / cols))
+                else:
+                    cols = max(1, math.ceil(math.sqrt(channels)))
+                    rows = max(1, math.ceil(channels / cols))
+                
+                fig, axes = plt.subplots(rows, cols, figsize=(cols * 3, rows * 3))
+                axes = axes.flatten()  # Flatten for easy indexing
+                
+                for i in range(channels):
+                    ax = axes[i]
+                    # ax.imshow(insight[batch_idx, :height, :width, i], cmap="viridis")
+                    ax.imshow(insight_prep[batch_idx, :, :, i], cmap="viridis")
+                    ax.set_title(f"{layer_name} Bt: {batch_idx+1} Ch. {i+1}")
+                    ax.axis("off")
+                
+                # Hide any remaining subplots if channels < rows * cols
+                for j in range(channels, len(axes)):
+                    axes[j].axis("off")
 
-        if should_save:
-            plt.savefig(os.path.join(save_path, f"{name}_insights_{layer_name}.jpg"), dpi=fig.dpi)
-
-        if should_show:
-            print("\nShowing Ground Truth Visualization*")
-            plt.show()
+                if should_save:
+                    plt.savefig(os.path.join(save_path, f"{layer_name}_batch{batch_idx+1}_{name}.jpg"), dpi=fig.dpi)
+                if should_show:
+                    plt.show()
+                else:
+                    plt.clf()
+                    plt.close(fig)
         else:
-            plt.clf()
-
+            raise Exception(f"Unexpected Insight Size. Size: {insight.size()}")
+        
+        
+        
 
 
 def transform_mask(mask, one_dimensional=False, input_color_map=None):
@@ -2620,7 +2824,7 @@ def eval_pred(pred, ground_truth, name="instance_segmentation", should_print=Tru
     fpr = calc_metric_with_object_matching(pred, ground_truth, calc_false_positive_rate)
     fnr = calc_metric_with_object_matching(pred, ground_truth, calc_false_negative_rate)
 
-    plot_and_save_evaluation(pixel_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name=name, should_print=should_print, should_save=should_save, save_path=save_path)
+    plot_and_save_evaluation(pixel_acc, bg_fg_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name=name, should_print=should_print, should_save=should_save, save_path=save_path)
 
     return pixel_acc, bg_fg_acc, iou, precision, recall, f1_score, dice, fpr, fnr
 
@@ -2810,6 +3014,7 @@ def inference(
             result_masks = np.transpose(result_masks, (1, 2, 0))
             
             # save mask
+            print("Saving the inference segmentation mask...")
             os.makedirs(output_dir, exist_ok=True)
 
             # result = {key: value.cpu() for key, value in result.items()}
@@ -2824,6 +3029,7 @@ def inference(
 
             # plot results
             if should_visualize:
+                print("Visualize your model...")
                 ncols = 3
 
                 fig, ax = plt.subplots(ncols=ncols, nrows=1, figsize=(20, 15), sharey=True)
@@ -2865,6 +3071,7 @@ def inference(
 
             # eval and plot ground truth comparisson
             if use_mask:
+                print("Evaluating your model...")
                 if show_evaluation:
                     print("Plot result in comparison to ground truth and evaluate with ground truth*")
                 # mask = cv2.resize(mask, extracted_mask.shape[1], extracted_mask.shape[0])
@@ -2897,8 +3104,12 @@ def inference(
                         plt.clf()
 
             if show_insights or save_insights:
-                visualize_insights(insights=DNN_INSIGHTS, should_save=save_insights, save_path=visualization_dir, name=cleaned_name, should_show=show_insights)
-                        
+                print("Looking insight your Mask RCNN...")
+                img_name = ".".join(name.split(".")[:-1])
+                inisght_dir = os.path.join(visualization_dir, "dnn_insights")
+                os.makedirs(inisght_dir, exist_ok=True)
+                visualize_insights(insights=DNN_INSIGHTS, should_save=save_insights, save_path=inisght_dir, name=img_name, should_show=show_insights)
+                          
             idx += 1
             DNN_INSIGHTS = {}
 
