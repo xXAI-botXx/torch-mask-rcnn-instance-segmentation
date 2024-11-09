@@ -62,7 +62,6 @@ class DATA_LOADING_MODE(Enum):
 
 class RUN_MODE(Enum):
     TRAIN = "train"
-    HYPERPARAMETER_TUNING = "hyperparameter_tuning"
     INFERENCE = "inference"
 
 
@@ -105,58 +104,19 @@ if MODE == RUN_MODE.TRAIN:
 
     MULTIPLE_DATASETS = GROUND_PATH         # Path to folder for training multiple models
     SKIP_DATASETS = ["3xM_Test_Datasets"]
-    NAME = 'mask_rcnn_rgb_nms_loss_weights'                 # Name of the model to use
+    NAME = 'mask_rcnn_rgb_nms_loss_weights_sgd'                 # Name of the model to use
 
     USING_EXPERIMENT_TRACKING = True   # Enable experiment tracking
     CREATE_NEW_EXPERIMENT = True       # Whether to create a new experiment run
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
     NUM_EPOCHS = 20                    # Number of training epochs
-    LEARNING_RATE = 5e-6              # Learning rate for the optimizer
+    WARM_UP_ITER = 2000
+    LEARNING_RATE = 7e-3              # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
-    DECAY = 0.0005                     # Weight decay for regularization
+    # DECAY = 0.0005                     # Weight decay for regularization
     BATCH_SIZE = 5                    # Batch size for training
     SHUFFLE = True                     # Shuffle the data during training
-    
-    # Decide which Data Augmentation should be applied
-    APPLY_RANDOM_FLIP = True
-    APPLY_RANDOM_ROTATION = True
-    APPLY_RANDOM_CROP = True
-    APPLY_RANDOM_BRIGHTNESS_CONTRAST = True
-    APPLY_RANDOM_GAUSSIAN_NOISE = True
-    APPLY_RANDOM_GAUSSIAN_BLUR = True
-    APPLY_RANDOM_SCALE = True
-    APPLY_RANDOM_BACKGROUND_MODIFICATION = True
-    
-    # MASK_SCORE_THRESHOLD = 0.9
-
-
-
-# --------------------- #
-# HYPERPARAMETER TUNING #
-# --------------------- #
-if MODE == RUN_MODE.HYPERPARAMETER_TUNING:
-    USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
-    VERIFY_DATA = False         # True is recommended
-
-    GROUND_PATH = "D:/3xM"    # "/mnt/morespace/3xM"
-    DATASET_NAME = "3xM_Dataset_160_80"
-    IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
-    DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
-    MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
-    WIDTH = 1920   # 1920, 1024, 800, 640                # Image width for processing
-    HEIGHT = 1080  # 1080, 576, 450, 360                    # Image height for processing
-
-    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
-    AMOUNT = 100                       # Number of images for random mode
-    START_IDX = 0                      # Starting index for range mode
-    END_IDX = 499                       # Ending index for range mode
-    IMAGE_NAME = "3xM_0_10_10.png"     # Specific image name for single mode
-
-    NUM_WORKERS = 4                    # Number of workers for data loading
-    BATCH_SIZE = 5
-    MOMENTUM = 0.9                     # Momentum for the optimizer
-    DECAY = 0.0005                     # Weight decay for regularization
     
     # Decide which Data Augmentation should be applied
     APPLY_RANDOM_FLIP = True
@@ -240,7 +200,7 @@ from PIL import Image    # for PyTorch Transformations
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam, SGD
-from torch.optim.lr_scheduler import OneCycleLR, CyclicLR
+from torch.optim.lr_scheduler import OneCycleLR, CyclicLR, LambdaLR
 
 import torchvision
 from torchvision.models.detection import MaskRCNN
@@ -258,7 +218,6 @@ import mlflow
 import mlflow.pytorch
 
 # optimization
-import optuna
 from scipy.optimize import linear_sum_assignment
 
 
@@ -326,16 +285,16 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
         
     # adjust loss weights
     model.rpn.rpn_cls_loss_weight = 1.0
-    model.rpn.rpn_bbox_loss_weight = 1.5
-    model.roi_heads.mask_loss_weight = 1.5
+    model.rpn.rpn_bbox_loss_weight = 2.0
+    model.roi_heads.mask_loss_weight = 2.0
     model.roi_heads.box_loss_weight = 1.0
     model.roi_heads.classification_loss_weight = 1.0
     
     # adjust non-maximum suppression
-    model.roi_heads.nms_thresh = 0.4
-    model.roi_heads.box_predictor.nms_thresh = 0.6  # Higher NMS threshold for fewer boxes
-    model.roi_heads.mask_predictor.mask_nms_thresh = 0.6  # Higher threshold for fewer overlapping masks
-    model.roi_heads.score_thresh = 0.5  # Increase the threshold for lower-confidence masks
+    model.roi_heads.nms_thresh = 0.3
+    model.roi_heads.box_predictor.nms_thresh = 0.7  # Higher NMS threshold for fewer boxes
+    model.roi_heads.mask_predictor.mask_nms_thresh = 0.7  # Higher threshold for fewer overlapping masks
+    model.roi_heads.score_thresh = 0.6  # Increase the threshold for lower-confidence masks
 
         
     # load weights
@@ -1114,7 +1073,7 @@ class Random_Scale:
 
 
 class Random_Background_Modification:
-    def __init__(self, bg_value=1, width=1920, height=1080, probability=0.05):
+    def __init__(self, bg_value=1, width=1920, height=1080, probability=0.2):
         self.bg_value = bg_value
         self.width = width
         self.height = height
@@ -1492,8 +1451,8 @@ def pad_masks(masks, max_num_objs):
 
 
 
-def train_loop(log_path, learning_rate, momentum, decay, num_epochs, 
-                batch_size, dataset, data_loader, name, experiment_tracking,
+def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batch_size, 
+               dataset, data_loader, name, experiment_tracking,
                 use_depth, weights_path, should_log=True, should_save=True,
                 return_objective='model', mask_score_threshold=0.9,
                 calc_metrics=False):
@@ -1532,11 +1491,21 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
 
     # Optimizer
     # params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
-    optimizer_name = "adam"
+    # optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
+    # optimizer_name = "adam"
+    optimizer = SGD(model.parameters(), lr=learning_rate, momentum=momentum, nesterov=True)  #, weight_decay=decay)
     
-    # scheduler = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
-    scheduler = CyclicLR(optimizer=optimizer, base_lr=learning_rate, max_lr=5e-4, step_size_up=int((len(dataset)/batch_size)/2)) 
+    # scheduler = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset)//batch_size, epochs=num_epochs//4)
+    # scheduler = CyclicLR(optimizer=optimizer, base_lr=learning_rate, max_lr=5e-4, step_size_up=int((len(dataset)/batch_size)/2)) 
+    def warm_up_and_cool_down_lr(steps):
+        # warm up phase -> increase learn rate
+        if steps < warm_up_iter:
+            return steps / warm_up_iter
+        else:
+            # cool down phase -> reduce learn rate
+            return 0.1 ** ((steps - warm_up_iter) // (num_epochs*(data_size//batch_size) - warm_up_iter))
+
+    scheduler = LambdaLR(optimizer, lr_lambda=warm_up_and_cool_down_lr)
 
     # Experiment Tracking
     if experiment_tracking:
@@ -1658,11 +1627,11 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
                 cur_total_loss = sum([value.cpu().detach().numpy() for value in loss_dict.values()])
 
                 # update optimizer and scheduler if near the goal
-                if cur_total_loss < 0.45 and optimizer_name == "adam":
-                    log(log_path, "\nTrain Update: Switched Optimizer from Adam to SGD\n", should_log=should_log, should_print=should_log)
-                    optimizer = SGD(params=model.parameters(), lr=learning_rate, momentum=momentum, weight_decay=decay)
-                    scheduler = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
-                    optimizer_name = "sgd"
+                # if cur_total_loss < 0.45 and optimizer_name == "adam":
+                #     log(log_path, "\nTrain Update: Switched Optimizer from Adam to SGD\n", should_log=should_log, should_print=should_log)
+                #     optimizer = SGD(params=model.parameters(), lr=learning_rate, momentum=momentum, weight_decay=decay)
+                #     scheduler = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
+                #     optimizer_name = "sgd"
 
                 if experiment_tracking:
                     # make experiment tracking
@@ -1751,8 +1720,15 @@ def train_loop(log_path, learning_rate, momentum, decay, num_epochs,
         )
         if calc_metrics:
             log(log_path, eval_str, should_log=should_log, should_print=should_log)
+            
+        if should_save:
+            save_path_model = f'./weights/{name}_epoch_{num_epochs:03}.pth'
+            torch.save(model.state_dict(), save_path_model)
 
-        log(log_path, f"\nCongratulations!!!! Your Model trained succefull!\n\n Your model waits here for you: '{f'./weights/{name}.pth'}'", should_log=True, should_print=True)
+        log(log_path, f"\nCongratulations!!!! Your Model trained succefull!", should_log=should_log, should_print=should_log)
+        
+        if should_save:
+            log(log_path, f"\n    -> Your model waits here for you: '{save_path_model}'", should_log=should_log, should_print=should_log)
 
     if return_objective.lower() == "loss":
         return cur_total_loss
@@ -1769,7 +1745,8 @@ def train(
         num_epochs=20,
         learning_rate=0.005,
         momentum=0.9,
-        decay=0.0005,
+        # decay=0.0005,
+        warm_up_iter=100,
         batch_size = 2,
         img_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb',
         depth_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep',
@@ -1952,7 +1929,8 @@ def train(
                 mlflow.log_param("batch_size", batch_size)
                 mlflow.log_param("learnrate", learning_rate)
                 mlflow.log_param("momentum", momentum)
-                mlflow.log_param("decay", decay)
+                mlflow.log_param("warm_up_iter", warm_up_iter)
+                # mlflow.log_param("decay", decay)
 
                 mlflow.log_param("images_path", img_dir)
                 mlflow.log_param("masks_path", mask_dir)
@@ -1978,7 +1956,8 @@ def train(
 
                 mlflow.pytorch.autolog()
 
-                train_loop(log_path=log_path, learning_rate=learning_rate, momentum=momentum, decay=decay, 
+                train_loop(log_path=log_path, learning_rate=learning_rate, momentum=momentum, # decay=decay,
+                            warm_up_iter=warm_up_iter, 
                             num_epochs=num_epochs, batch_size=batch_size, dataset=dataset, data_loader=data_loader, 
                             name=name, experiment_tracking=using_experiment_tracking, use_depth=use_depth,
                             weights_path=weights_path, should_log=True, should_save=True,
@@ -1988,94 +1967,12 @@ def train(
                 if is_mlflow_active():
                     mlflow.end_run()
         else:
-            train_loop(log_path=log_path, learning_rate=learning_rate, momentum=momentum, decay=decay, 
+            train_loop(log_path=log_path, learning_rate=learning_rate, momentum=momentum, # decay=decay, 
+                            warm_up_iter=warm_up_iter,
                             num_epochs=num_epochs, batch_size=batch_size, dataset=dataset, data_loader=data_loader, 
                             name=name, experiment_tracking=using_experiment_tracking, use_depth=use_depth,
                             weights_path=weights_path, should_log=True, should_save=True,
                             return_objective="None")
-
-
-
-
-def hyperparameter_optimization(trial,
-                                img_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb',
-                                depth_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep',
-                                mask_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/mask-prep',
-                                num_workers=4,
-                                batch_size=1,
-                                momentum=0.9,
-                                decay=0.0005,
-                                amount=100,     # for random mode
-                                start_idx=0,    # for range mode
-                                end_idx=99,     # for range mode
-                                image_name="3xM_0_10_10.jpg", # for single mode
-                                data_mode=DATA_LOADING_MODE.ALL,
-                                use_depth=False,
-                                width=1920,
-                                height=1080,
-                                apply_random_flip=True, 
-                                apply_random_rotation=True,
-                                apply_random_crop=True, 
-                                apply_random_brightness_contrast=True,
-                                apply_random_gaussian_noise=True, 
-                                apply_random_gaussian_blur=True,
-                                apply_random_scale=True,
-                                verify_data=True
-                            ):
-    now = datetime.now()
-    print(f"    - Start next trial ({now.hour:02}:{now.minute:02} {now.day:02}.{now.month:02}.{now.year:04})")
-    
-    
-    # Hyperparameters to optimize
-    learning_rate = trial.suggest_float('learning_rate', 1e-7, 1e-3, log=True)
-    # momentum = trial.suggest_float('momentum', 0.7, 0.99)
-    # decay = trial.suggest_float('decay', 1e-5, 1e-1, log=True)
-    num_epochs = trial.suggest_int('num_epochs', 2, 20) 
-    
-    
-    augmentation = Train_Augmentations(width=width, height=height,
-                                        apply_random_flip=apply_random_flip, 
-                                        apply_random_rotation=apply_random_rotation,
-                                        apply_random_crop=apply_random_crop, 
-                                        apply_random_brightness_contrast=apply_random_brightness_contrast,
-                                        apply_random_gaussian_noise=apply_random_gaussian_noise, 
-                                        apply_random_gaussian_blur=apply_random_gaussian_blur,
-                                        apply_random_scale=apply_random_scale,
-                                        log_path=None,
-                                        should_log=False,
-                                        should_print=False)
-    dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=augmentation, 
-                                amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
-                                data_mode=data_mode, use_mask=True, use_depth=use_depth, log_path=None,
-                                width=width, height=height, should_log=True, should_print=True, should_verify=verify_data)
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
-
-    # Call training function
-    total_loss = train_loop(
-                    log_path='./logs/trial_log.txt',
-                    learning_rate=learning_rate,
-                    momentum=momentum,
-                    decay=decay,
-                    num_epochs=num_epochs,
-                    batch_size=batch_size,
-                    dataset=dataset, 
-                    data_loader=data_loader,  
-                    name='mask_rcnn_trial',
-                    experiment_tracking=False, 
-                    use_depth=False,
-                    weights_path=None,
-                    should_log=False, 
-                    should_save=False,
-                    return_objective="loss"
-                )
-    
-    if total_loss is None:
-        total_loss = 7777.777
-    else:
-        
-        total_loss = round(total_loss, 5)
-
-    return total_loss
 
 
 
@@ -3158,9 +3055,10 @@ if __name__ == "__main__":
                 name=name,
                 weights_path=WEIGHTS_PATH,
                 num_epochs=NUM_EPOCHS,
+                warm_up_iter=WARM_UP_ITER,
                 learning_rate=LEARNING_RATE,
                 momentum=MOMENTUM,
-                decay=DECAY,
+                # decay=DECAY,
                 batch_size=BATCH_SIZE,
                 img_dir=img_path,
                 mask_dir=mask_path,
@@ -3189,49 +3087,6 @@ if __name__ == "__main__":
                 # mask_score_threshold=MASK_SCORE_THRESHOLD,
                 verify_data=VERIFY_DATA
             )
-    elif MODE == RUN_MODE.HYPERPARAMETER_TUNING:
-        print("Start Hyperparameter optimization...")
-        
-        # add parameters to function
-        partial_optimization_func = partial(hyperparameter_optimization, 
-                                            img_dir=IMG_DIR,
-                                            depth_dir=DEPTH_DIR,
-                                            mask_dir=MASK_DIR,
-                                            num_workers=NUM_WORKERS,
-                                            batch_size=BATCH_SIZE,
-                                            momentum=MOMENTUM,
-                                            decay=DECAY,
-                                            amount=AMOUNT,     # for random mode
-                                            start_idx=START_IDX,    # for range mode
-                                            end_idx=END_IDX,     # for range mode
-                                            image_name=IMAGE_NAME, # for single mode
-                                            data_mode=DATA_MODE,
-                                            use_depth=USE_DEPTH,
-                                            width=WIDTH,
-                                            height=HEIGHT,
-                                            apply_random_flip=APPLY_RANDOM_FLIP, 
-                                            apply_random_rotation=APPLY_RANDOM_ROTATION,
-                                            apply_random_crop=APPLY_RANDOM_CROP, 
-                                            apply_random_brightness_contrast=APPLY_RANDOM_BRIGHTNESS_CONTRAST,
-                                            apply_random_gaussian_noise=APPLY_RANDOM_GAUSSIAN_NOISE, 
-                                            apply_random_gaussian_blur=APPLY_RANDOM_GAUSSIAN_BLUR,
-                                            apply_random_scale=APPLY_RANDOM_SCALE,
-                                            apply_random_background_modification=APPLY_RANDOM_BACKGROUND_MODIFICATION,
-                                            # mask_score_threshold=MASK_SCORE_THRESHOLD
-                                            verify_data=VERIFY_DATA
-                                        )
-                                    
-        study = optuna.create_study(direction='minimize')
-        study.optimize(partial_optimization_func, n_trials=20) 
-
-        # Print best hyperparameters
-        now = datetime.now()
-        print(f"Optimization with Optuna is finish! ({now.hour:02}:{now.minute:02} {now.day:02}.{now.month:02}.{now.year:04})")
-    
-        result_str = f"Best hyperparameters:\n{study.best_params}\n\n\nBest total loss: {study.best_value}"
-        print(result_str)
-        with open("./optuna_result.txt", "w") as optuna_file:
-            optuna_file.write(result_str)
     elif MODE == RUN_MODE.INFERENCE:
         inference(
                 weights_path=WEIGHTS_PATH,
