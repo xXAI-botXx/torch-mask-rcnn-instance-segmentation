@@ -87,7 +87,7 @@ if MODE == RUN_MODE.TRAIN:
     VERIFY_DATA = False         # True is recommended
 
     GROUND_PATH = "/mnt/morespace/3xM"    # "/mnt/morespace/3xM" "D:/3xM" 
-    DATASET_NAME = "3xM_Dataset_160_80"
+    DATASET_NAME = "3xM_Dataset_80_80"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
     MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
@@ -104,15 +104,15 @@ if MODE == RUN_MODE.TRAIN:
 
     MULTIPLE_DATASETS = GROUND_PATH         # Path to folder for training multiple models
     SKIP_DATASETS = ["3xM_Test_Datasets"]
-    NAME = 'mask_rcnn_rgb_nms_loss_weights_sgd'                 # Name of the model to use
+    NAME = 'mask_rcnn_rgb'                 # Name of the model to use
 
     USING_EXPERIMENT_TRACKING = True   # Enable experiment tracking
     CREATE_NEW_EXPERIMENT = True       # Whether to create a new experiment run
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
-    NUM_EPOCHS = 20                    # Number of training epochs
+    NUM_EPOCHS = 30                    # Number of training epochs
     WARM_UP_ITER = 2000
-    LEARNING_RATE = 7e-3              # Learning rate for the optimizer
+    LEARNING_RATE = 3e-3              # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
     # DECAY = 0.0005                     # Weight decay for regularization
     BATCH_SIZE = 5                    # Batch size for training
@@ -136,7 +136,7 @@ if MODE == RUN_MODE.TRAIN:
 # INFERENCE #
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
-    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_80_80_epoch_015.pth"  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_rgb.pth"  # Path to the model weights file
     MASK_SCORE_THRESHOLD = 0.5
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
@@ -291,10 +291,10 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
     model.roi_heads.classification_loss_weight = 1.0
     
     # adjust non-maximum suppression
-    model.roi_heads.nms_thresh = 0.3
-    model.roi_heads.box_predictor.nms_thresh = 0.7  # Higher NMS threshold for fewer boxes
-    model.roi_heads.mask_predictor.mask_nms_thresh = 0.7  # Higher threshold for fewer overlapping masks
-    model.roi_heads.score_thresh = 0.6  # Increase the threshold for lower-confidence masks
+    model.roi_heads.nms_thresh = 0.4
+    model.roi_heads.box_predictor.nms_thresh = 0.4  # Higher NMS threshold for fewer boxes
+    model.roi_heads.mask_predictor.mask_nms_thresh = 0.4  # Higher threshold for fewer overlapping masks
+    model.roi_heads.score_thresh = 0.4  # Increase the threshold for lower-confidence masks
 
         
     # load weights
@@ -2070,7 +2070,7 @@ def visualize_insights(insights, should_save, save_path, name, should_show, max_
     # print(type(insights))
     insights_dict = insights
     
-    # To GPU
+    # Detach and bring back to CPU
     insights_dict = {k: v.detach().cpu() for k, v in insights_dict.items()}
     
     for layer_name, insight in insights_dict.items():
