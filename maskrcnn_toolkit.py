@@ -110,7 +110,7 @@ if MODE == RUN_MODE.TRAIN:
     CREATE_NEW_EXPERIMENT = True       # Whether to create a new experiment run
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
-    NUM_EPOCHS = 30                    # Number of training epochs
+    NUM_EPOCHS = 50                    # Number of training epochs
     WARM_UP_ITER = 2000
     LEARNING_RATE = 3e-3              # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
