@@ -897,22 +897,22 @@ def collate_fn(batch):
     This function assumes that the input batch is non-empty and that each 
     target contains a "masks" key with the corresponding tensor.
     """
-    zipped_batch = list(zip(*batch))
+    images, targets, names = zip(*batch)
+        
+    # Find the max number of masks/objects in current batch
+    max_num_objs = max(target["masks"].shape[0] for target in targets)
     
-    if len(zipped_batch) == 2:
-        images, names = zipped_batch
-        return torch.stack(images, 0), names
-    else:
-        images, targets, names = zipped_batch
-        
-        # Find the max number of masks/objects in current batch
-        max_num_objs = max(target["masks"].shape[0] for target in targets)
-        
-        # Add padding
-        for target in targets:
-            target["masks"] = pad_masks(target["masks"], max_num_objs)
-        
-        return torch.stack(images, 0), targets, names
+    # Add padding
+    for target in targets:
+        target["masks"] = pad_masks(target["masks"], max_num_objs)
+    
+    return torch.stack(images, 0), targets, names
+
+
+def collate_without_mask_fn(batch):
+    images, names = zip(*batch)
+    
+    return torch.stack(images, 0), names
 
 
 
@@ -2858,7 +2858,10 @@ def inference(
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
                                 data_mode=data_mode, use_mask=use_mask, use_depth=use_depth, log_path=None,
                                 width=width, height=height, should_log=False, should_print=True, should_verify=verify_data)
-    data_loader = DataLoader(dataset, batch_size=1, num_workers=num_workers, collate_fn=collate_fn)
+    if use_mask:
+        data_loader = DataLoader(dataset, batch_size=1, num_workers=num_workers, collate_fn=collate_fn)
+    else:
+        data_loader = DataLoader(dataset, batch_size=1, num_workers=num_workers, collate_fn=collate_without_mask_fn)
 
     all_images_size = len(data_loader)
 
@@ -2901,7 +2904,7 @@ def inference(
                 masks = masks.to(device)
                 name = data[2][0]
             else:
-                image = data[0][0]
+                image = data[0][0].to(device).unsqueeze(0)
                 name = data[1][0]
 
             # inference
