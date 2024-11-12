@@ -160,15 +160,14 @@ if MODE == RUN_MODE.INFERENCE:
     OUTPUT_DIR = "./output"            # Directory to save output files
     USE_MASK = True                    # Whether to use masks during inference
     OUTPUT_TYPE = "png"                # Output format: 'numpy-array' or 'png'
-    SHOULD_VISUALIZE = True            # Whether to visualize the results
-    VISUALIZATION_DIR = "./output/visualizations"  # Directory to save visualizations
-    SAVE_VISUALIZATION = True          # Save the visualizations to disk
+    SHOULD_VISUALIZE = False            # Whether to visualize the results
+    SAVE_VISUALIZATION = False          # Save the visualizations to disk
     SHOW_VISUALIZATION = False          # Display the visualizations
     SAVE_EVALUATION = True             # Save the evaluation results
     SHOW_EVALUATION = False             # Display the evaluation results
 
     SHOW_INSIGHTS = False
-    SAVE_INSIGHTS = True
+    SAVE_INSIGHTS = False
 
 
 
@@ -188,6 +187,7 @@ import math
 import statistics
 import queue
 from collections import OrderedDict
+import pickle
 
 # image
 import random
@@ -2374,12 +2374,9 @@ def extract_and_visualize_mask(masks, image=None, ax=None, visualize=True, color
                         if color_image[cur_row_idx, cur_col_idx].sum() == 0:
                             color_image[cur_row_idx, cur_col_idx] = image[cur_row_idx, cur_col_idx]
 
-                # Set the transparency levels (alpha and beta)
-                alpha = 0.7  # transparency of 1. image
-                beta = 1 - alpha  # transparency of 2. image
-
                 # Blend the images
-                color_image = cv2.addWeighted(image, alpha, color_image, beta, 0)
+                # color_image = cv2.addWeighted(image, alpha, color_image, beta, 0)
+                color_image = cv2.addWeighted(image, 1, color_image, 0.6, 0)
                 # color_image = cv2.add(color_image, image)
 
         if ax is None:
@@ -2412,9 +2409,9 @@ def visualize_results(image, predictions, score_threshold=0.5):
             box = pred_boxes[idx].astype(int)
             cv2.rectangle(image, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2)
             # Draw Mask
-            mask = pred_masks[idx, 0] > 0.5  # Binarisiere die Maske
+            mask = pred_masks[idx, 0] > 0.5  
             colored_mask = np.zeros_like(image, dtype=np.uint8)
-            colored_mask[mask] = [0, 0, 255]  # F�rbe die Maske rot
+            colored_mask[mask] = [0, 0, 255]  
             image = cv2.addWeighted(image, 1, colored_mask, 0.5, 0)
     
     return image
@@ -2767,8 +2764,14 @@ def save_and_show_evaluation_summary(sum_dict, name="instance_segmentation", sho
     fpr = statistics.mean(sum_dict["false positive rate"])
     fnr = statistics.mean(sum_dict["false negative rate"])
 
+    # save as txt file
     plot_and_save_evaluation(pixel_acc, bg_fg_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name=name, should_print=should_print, should_save=should_save, save_path=save_path)
 
+    # save dict as pickle file
+    if should_save:
+        path = os.path.join(save_path, f"{name}_eval.pkl")
+        with open(path, "wb") as file:  
+            pickle.dump(sum_dict, file)
 
 
 
@@ -2788,7 +2791,6 @@ def inference(
         output_type="jpg",
         output_dir="./output",
         should_visualize=True,
-        visualization_dir="./output/visualizations",
         save_visualization=True,
         save_evaluation=True,
         show_visualization=False,
@@ -2858,6 +2860,8 @@ def inference(
     model_name = ".".join(weights_path.split("/")[-1].split(".")[:-1])
 
     eval_sum_dict = dict()
+    eval_dir = os.path.join(output_dir, "evaluations")
+    visualization_dir = os.path.join(output_dir, "visualizations")
 
     with torch.no_grad():
         # create model
@@ -2976,7 +2980,7 @@ def inference(
                     print("Plot result in comparison to ground truth and evaluate with ground truth*")
                 # mask = cv2.resize(mask, extracted_mask.shape[1], extracted_mask.shape[0])
                 masks_gt = extract_and_visualize_mask(masks_gt, image=None, ax=None, visualize=False, color_map=None, soft_join=False)
-                eval_results = eval_pred(extracted_mask, masks_gt, name=cleaned_name, should_print=show_evaluation, should_save=save_evaluation, save_path=output_dir)
+                eval_results = eval_pred(extracted_mask, masks_gt, name=cleaned_name, should_print=show_evaluation, should_save=save_evaluation, save_path=eval_dir)
                 eval_sum_dict = update_evaluation_summary(sum_dict=eval_sum_dict, results=eval_results)
 
                 if should_visualize:
@@ -3012,6 +3016,8 @@ def inference(
                           
             idx += 1
             DNN_INSIGHTS = {}
+            
+            plt.close()
 
         if use_mask:
             save_and_show_evaluation_summary(eval_sum_dict, name="Complete-Evaluation", should_print=show_evaluation, should_save=save_evaluation, save_path=output_dir)
@@ -3107,7 +3113,6 @@ if __name__ == "__main__":
                 output_type=OUTPUT_TYPE,
                 output_dir=OUTPUT_DIR,
                 should_visualize=SHOULD_VISUALIZE,
-                visualization_dir=VISUALIZATION_DIR,
                 save_visualization=SAVE_VISUALIZATION,
                 save_evaluation=SAVE_EVALUATION,
                 show_visualization=SHOW_VISUALIZATION,
