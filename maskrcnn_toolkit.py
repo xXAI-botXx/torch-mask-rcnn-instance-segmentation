@@ -136,20 +136,20 @@ if MODE == RUN_MODE.TRAIN:
 # INFERENCE #
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
-    WEIGHTS_PATH = "./weights/mask_rcnn_rgb.pth"  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_10_160_epoch_045.pth"  # Path to the model weights file
     MASK_SCORE_THRESHOLD = 0.5
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
 
-    GROUND_PATH = "/mnt/morespace/3xM"   # "/mnt/morespace/3xM"
-    DATASET_NAME = "3xM_Dataset_80_80"
+    GROUND_PATH = "D:/3xM/3xM_Test_Dataset"   # "/mnt/morespace/3xM"
+    DATASET_NAME = "3xM_Bias_Experiment"    #  "3xM_Bias_Experiment", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
     MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
     WIDTH = 1920                       # Image width for processing
     HEIGHT = 1080                      # Image height for processing
 
-    DATA_MODE = DATA_LOADING_MODE.RANGE  # Mode for loading data -> All, Random, Range, Single Image
+    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 10                       # Number of images for random mode
     START_IDX = 0                      # Starting index for range mode
     END_IDX = 0                       # Ending index for range mode
@@ -897,7 +897,7 @@ def collate_fn(batch):
     This function assumes that the input batch is non-empty and that each 
     target contains a "masks" key with the corresponding tensor.
     """
-    zipped_batch = zip(*batch)
+    zipped_batch = list(zip(*batch))
     
     if len(zipped_batch) == 2:
         images, names = zipped_batch
