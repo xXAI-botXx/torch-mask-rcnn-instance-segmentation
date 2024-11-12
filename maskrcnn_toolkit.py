@@ -82,12 +82,12 @@ MODE = RUN_MODE.TRAIN
 # TRAINING #
 # -------- #
 if MODE == RUN_MODE.TRAIN:
-    WEIGHTS_PATH = None  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_10_160_epoch_045.pth"  # Path to the model weights file
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
 
     GROUND_PATH = "/mnt/morespace/3xM"    # "/mnt/morespace/3xM" "D:/3xM" 
-    DATASET_NAME = "3xM_Dataset_80_80"
+    DATASET_NAME = "3xM_Dataset_10_160"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
     MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
@@ -102,15 +102,15 @@ if MODE == RUN_MODE.TRAIN:
 
     NUM_WORKERS = 4                    # Number of workers for data loading
 
-    MULTIPLE_DATASETS = GROUND_PATH         # Path to folder for training multiple models
-    SKIP_DATASETS = ["3xM_Test_Datasets"]
+    MULTIPLE_DATASETS = None # GROUND_PATH         # Path to folder for training multiple models
+    SKIP_DATASETS = ["3xM_Test_Datasets", "3xM_Dataset_10_160"]
     NAME = 'mask_rcnn_rgb'                 # Name of the model to use
 
     USING_EXPERIMENT_TRACKING = True   # Enable experiment tracking
     CREATE_NEW_EXPERIMENT = True       # Whether to create a new experiment run
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
-    NUM_EPOCHS = 50                    # Number of training epochs
+    NUM_EPOCHS = 5                    # Number of training epochs
     WARM_UP_ITER = 2000
     LEARNING_RATE = 3e-3              # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
@@ -897,16 +897,22 @@ def collate_fn(batch):
     This function assumes that the input batch is non-empty and that each 
     target contains a "masks" key with the corresponding tensor.
     """
-    images, targets, names = zip(*batch)
+    zipped_batch = zip(*batch)
     
-    # Find the max number of masks/objects in current batch
-    max_num_objs = max(target["masks"].shape[0] for target in targets)
-    
-    # Add padding
-    for target in targets:
-        target["masks"] = pad_masks(target["masks"], max_num_objs)
-    
-    return torch.stack(images, 0), targets, names
+    if len(zipped_batch) == 2:
+        images, names = zipped_batch
+        return torch.stack(images, 0), names
+    else:
+        images, targets, names = zipped_batch
+        
+        # Find the max number of masks/objects in current batch
+        max_num_objs = max(target["masks"].shape[0] for target in targets)
+        
+        # Add padding
+        for target in targets:
+            target["masks"] = pad_masks(target["masks"], max_num_objs)
+        
+        return torch.stack(images, 0), targets, names
 
 
 
