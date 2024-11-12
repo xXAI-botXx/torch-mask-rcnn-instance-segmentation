@@ -2866,7 +2866,9 @@ def inference(
 
     eval_sum_dict = dict()
     eval_dir = os.path.join(output_dir, "evaluations")
+    os.makedirs(eval_dir, exist_ok=True)
     visualization_dir = os.path.join(output_dir, "visualizations")
+    os.makedirs(visualization_dir, exist_ok=True)
 
     with torch.no_grad():
         # create model
