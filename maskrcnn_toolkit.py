@@ -299,7 +299,10 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
         
     # load weights
     if weights_path:
-        model.load_state_dict(state_dict=torch.load(weights_path, weights_only=True)) 
+        if torch.cuda.is_available():
+            model.load_state_dict(state_dict=torch.load(weights_path, weights_only=True)) 
+        else:
+            model.load_state_dict(state_dict=torch.load(weights_path, weights_only=True, map_location=torch.device('cpu'))) 
     
     model_str = "Parameter of Mask R-CNN:"
     model_parts = dict()
