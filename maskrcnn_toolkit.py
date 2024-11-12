@@ -1705,7 +1705,6 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
             writer.close()
         except Exception:
             pass
-        return
 
     # log & print info
     if should_log:
@@ -1724,14 +1723,14 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
         if calc_metrics:
             log(log_path, eval_str, should_log=should_log, should_print=should_log)
             
-        if should_save:
-            save_path_model = f'./weights/{name}_epoch_{num_epochs:03}.pth'
-            torch.save(model.state_dict(), save_path_model)
+    if should_save:
+        save_path_model = f'./weights/{name}_epoch_{num_epochs:03}.pth'
+        torch.save(model.state_dict(), save_path_model)
 
-        log(log_path, f"\nCongratulations!!!! Your Model trained succefull!", should_log=should_log, should_print=should_log)
-        
-        if should_save:
-            log(log_path, f"\n    -> Your model waits here for you: '{save_path_model}'", should_log=should_log, should_print=should_log)
+    log(log_path, f"\nCongratulations!!!! Your Model trained succefull!", should_log=should_log, should_print=should_log)
+    
+    if should_save:
+        log(log_path, f"\n    -> Your model waits here for you: '{save_path_model}'", should_log=should_log, should_print=should_log)
 
     if return_objective.lower() == "loss":
         return cur_total_loss
