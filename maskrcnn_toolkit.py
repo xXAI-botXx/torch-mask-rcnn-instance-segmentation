@@ -74,7 +74,7 @@ class RUN_MODE(Enum):
 #############
 # Change these variables to your need
 
-MODE = RUN_MODE.TRAIN
+MODE = RUN_MODE.INFERENCE
 
 
 
@@ -141,19 +141,19 @@ if MODE == RUN_MODE.INFERENCE:
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
 
-    GROUND_PATH = "D:/3xM/3xM_Test_Dataset"   # "/mnt/morespace/3xM"
-    DATASET_NAME = "3xM_Bias_Experiment"    #  "3xM_Bias_Experiment", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
+    GROUND_PATH = "D:/3xM"   # "/mnt/morespace/3xM"    "D:/3xM/3xM_Test_Dataset/3xM_Bias_Experiment"
+    DATASET_NAME = "3xM_Dataset_10_80"    #  "3xM_Bias_Experiment", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
     MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
     WIDTH = 1920                       # Image width for processing
     HEIGHT = 1080                      # Image height for processing
 
-    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
+    DATA_MODE = DATA_LOADING_MODE.SINGLE  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 10                       # Number of images for random mode
     START_IDX = 0                      # Starting index for range mode
     END_IDX = 0                       # Ending index for range mode
-    IMAGE_NAME = "3xM_0_10_10.png"     # Specific image name for single mode
+    IMAGE_NAME = "3xM_10000_10_80.png"     # Specific image name for single mode
 
     NUM_WORKERS = 4                    # Number of workers for data loading
 
@@ -163,11 +163,11 @@ if MODE == RUN_MODE.INFERENCE:
     SHOULD_VISUALIZE = False            # Whether to visualize the results
     SAVE_VISUALIZATION = False          # Save the visualizations to disk
     SHOW_VISUALIZATION = False          # Display the visualizations
-    SAVE_EVALUATION = True             # Save the evaluation results
+    SAVE_EVALUATION = False             # Save the evaluation results
     SHOW_EVALUATION = False             # Display the evaluation results
 
     SHOW_INSIGHTS = False
-    SAVE_INSIGHTS = False
+    SAVE_INSIGHTS = True
 
 
 
@@ -1995,239 +1995,328 @@ def train(
 
 DNN_INSIGHTS = {}
 
-def register_hook(layer, layer_name):
-    def hook(module, input, output):
-        try:
-            new_dict = extract_torch_tensor_layer_as_dict(output, layer_name, i=0)
-            DNN_INSIGHTS.update(new_dict)
-            
-            # if type(output) == tuple:
-            #     try:
-            #         layer_values = tuple()
-            #         for v in output:
-            #             if type(v) == list:
-            #                 for sub_v in v:
-            #                     if type(sub_v) == torch.Tensor:
-            #                         layer_values += (sub_v.detach().cpu(), )
-            #                     else:
-            #                         raise ValueError(f"Wrong subsubtype in insight: {type(sub_v)}")
-            #             elif type(v) == torch.Tensor:
-            #                 layer_values += (v.detach().cpu(), )
-            #             else:
-            #                 raise ValueError(f"Wrong subtype in insight: {type(v)}")
-            #         DNN_INSIGHTS[layer_name] = layer_values
-            #     except Exception as e:
-            #         print("LEN:", len(output[0]))
-            #         raise e
-            # elif type(output) == torch.Tensor:
-            #     DNN_INSIGHTS[layer_name] = output.detach().cpu()
-            # else:
-            #     DNN_INSIGHTS[layer_name] = {k: v.detach().cpu() for k, v in output.items()} # output.detach().cpu()
-        except:
-            print(f"Error because dtype {type(output)} in register_hook")
-            print(output)
-            # for k, v in output.items():
-            #     print(f"k: {k}, v: {v}")
-            raise Exception("Exception")
-    layer.register_forward_hook(hook)
-
-
+def hook_func(module, input, output, name):
+    try:
+        DNN_INSIGHTS[name] = {
+            # 'input': input[0].detach().cpu(),  # Store only the first input tensor
+            'output': output.detach().cpu()
+        }
+    except AttributeError as e:
+        print(f"Error: {e} Data: {input}")
 
 def register_maskrcnn_hooks(model):
-    # register_hook(model.fpn.layer2, "fpn.layer2")
-    register_hook(model.backbone.body, "resnet")
-    register_hook(model.backbone.fpn, "fpn")
-    register_hook(model.rpn.head, "rpn")
-    register_hook(model.roi_heads.mask_head[0], "roi_align")
-    register_hook(model.roi_heads.box_head, "box_head")
-    register_hook(model.roi_heads.box_predictor, "box_predictor")
-    register_hook(model.roi_heads.mask_head, "mask_head")
-    register_hook(model.roi_heads.mask_predictor, "mask_predictor")
+    # # Attach hooks for backbone (ResNet layers)
+    # model.backbone.body.layer1.register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'backbone_layer1'))
+    # model.backbone.body.layer4.register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'backbone_layer4'))
+
+    # # Attach hooks for FPN layers
+    # model.backbone.fpn.inner_blocks[0].register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'fpn_inner_block_0'))
+
+    # # Attach hooks for RPN (head)
+    # model.rpn.head.conv[0].register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'rpn_conv'))
+    # model.rpn.head.cls_logits.register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'rpn_cls_logits'))
+    # model.rpn.head.bbox_pred.register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'rpn_bbox_pred'))
+
+    # # Attach hooks for ROI heads
+    # model.roi_heads.box_head.fc6.register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'roi_fc6'))
+    # model.roi_heads.mask_head[0][0].register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'mask_head_0'))
+    # model.roi_heads.mask_predictor.conv5_mask.register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'mask_conv5'))
+
+    ###############################################################################################################################
+    # Grad-CAM für Feature-Maps der Backbone-ResNet-Layer
+    # model.backbone.body.layer4[2].conv3.register_forward_hook(
+    #     lambda m, i, o: hook_func(m, i, o, 'resnet_layer4_conv3')
+    # )
+
+    # # Visualisierung der Feature Pyramid Network (FPN) Levels
+    # model.backbone.fpn.inner_blocks[0].register_forward_hook(
+    #     lambda m, i, o: hook_func(m, i, o, 'fpn_inner_block_P2')
+    # )
+    # model.backbone.fpn.layer_blocks[0].register_forward_hook(
+    #     lambda m, i, o: hook_func(m, i, o, 'fpn_layer_block_P2')
+    # )
+
+    # model.backbone.fpn.inner_blocks[1].register_forward_hook(
+    #     lambda m, i, o: hook_func(m, i, o, 'fpn_inner_block_P3')
+    # )
+    # model.backbone.fpn.layer_blocks[1].register_forward_hook(
+    #     lambda m, i, o: hook_func(m, i, o, 'fpn_layer_block_P3')
+    # )
+
+    # # Erfassen der RPN-Anker (Anchor Boxen)
+    # model.rpn.head.cls_logits.register_forward_hook(
+    #     lambda m, i, o: hook_func(m, i, o, 'rpn_cls_logits')
+    # )
+    # model.rpn.head.bbox_pred.register_forward_hook(
+    #     lambda m, i, o: hook_func(m, i, o, 'rpn_bbox_pred')
+    # )
+
+    # # RoI Align - Grid-Erzeugung für jedes RoI
+    # model.roi_heads.box_roi_pool.register_forward_hook(
+    #     lambda m, i, o: hook_func(m, i, o, 'roi_align')
+    # )
+
+    # # Vergleich der Klassifikations- und Regressions-Ergebnisse im ROI Head
+    # model.roi_heads.box_head.fc7.register_forward_hook(
+    #     lambda m, i, o: hook_func(m, i, o, 'roi_box_head_fc7')
+    # )
+    # model.roi_heads.box_predictor.cls_score.register_forward_hook(
+    #     lambda m, i, o: hook_func(m, i, o, 'roi_cls_score')
+    # )
+    # model.roi_heads.box_predictor.bbox_pred.register_forward_hook(
+    #     lambda m, i, o: hook_func(m, i, o, 'roi_bbox_pred')
+    # )
+
+    # # Masken-Visualisierung in verschiedenen Masken-Layern
+    # model.roi_heads.mask_head.mask_fcn_logits.register_forward_hook(
+    #     lambda m, i, o: hook_func(m, i, o, 'mask_fcn_logits')
+    # )
+
+    # # Proben der Gewichte in den Backbone-Schichten (ResNet)
+    # model.backbone.body.layer4[2].conv3.weight.register_hook(
+    #     lambda grad: hook_func(None, None, grad, 'resnet_layer4_conv3_weight_grad')
+    # )
+
+    # # Visualisierung der Masken-Segmentierungslogits
+    # model.roi_heads.mask_predictor.mask_fcn_logits.register_forward_hook(
+    #     lambda m, i, o: hook_func(m, i, o, 'mask_predictor_logits')
+    # )
+
+    # # Weight-Watch für Gradienten-Änderungen in den Convolution-Layern
+    # model.backbone.fpn.inner_blocks[3][0].weight.register_hook(
+    #     lambda grad: hook_func(None, None, grad, 'fpn_inner_block_P5_weight_grad')
+    # )
+
+    # # Verteilung der Masken-Beschriftungen auf den RoIs (RoI Heads Masken)
+    # model.roi_heads.mask_predictor.register_forward_hook(
+    #     lambda m, i, o: hook_func(m, i, o, 'roi_mask_predictor')
+    # )
+    ######################################################################################################
+    # Hook for ResNet layer 1, first convolution
+    model.backbone.body.layer1[0].conv1.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer1_conv1')
+    )
+
+    # Hook for ResNet layer 1, second convolution
+    model.backbone.body.layer1[0].conv2.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer1_conv2')
+    )
+
+    # Hook for ResNet layer 1, third convolution
+    model.backbone.body.layer1[0].conv3.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer1_conv3')
+    )
+
+    # Hook for ResNet layer 2, first block's first convolution
+    model.backbone.body.layer2[0].conv1.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer2_conv1')
+    )
+
+    # Hook for ResNet layer 2, first block's second convolution
+    model.backbone.body.layer2[0].conv2.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer2_conv2')
+    )
+
+    # Hook for ResNet layer 2, first block's third convolution
+    model.backbone.body.layer2[0].conv3.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer2_conv3')
+    )
+
+    # Hook for ResNet layer 3, first block's first convolution
+    model.backbone.body.layer3[0].conv1.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer3_conv1')
+    )
+
+    # Hook for ResNet layer 3, first block's second convolution
+    model.backbone.body.layer3[0].conv2.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer3_conv2')
+    )
+
+    # Hook for ResNet layer 3, first block's third convolution
+    model.backbone.body.layer3[0].conv3.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer3_conv3')
+    )
+
+    # Hook for ResNet layer 4, first block's first convolution
+    model.backbone.body.layer4[0].conv1.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer4_conv1')
+    )
+
+    # Hook for ResNet layer 4, first block's second convolution
+    model.backbone.body.layer4[0].conv2.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer4_conv2')
+    )
+
+    # Hook for ResNet layer 4, first block's third convolution
+    model.backbone.body.layer4[0].conv3.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer4_conv3')
+    )
+
+    # Hook for ResNet layer 4, second block's first convolution
+    model.backbone.body.layer4[1].conv1.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer4_block2_conv1')
+    )
+
+    # Hook for ResNet layer 4, second block's second convolution
+    model.backbone.body.layer4[1].conv2.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer4_block2_conv2')
+    )
+
+    # Hook for ResNet layer 4, second block's third convolution
+    model.backbone.body.layer4[1].conv3.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer4_block2_conv3')
+    )
+
+    # Hook for ResNet layer 4, third block's first convolution (deepest layer)
+    model.backbone.body.layer4[2].conv1.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer4_block3_conv1')
+    )
+
+    # Hook for ResNet layer 4, third block's second convolution (deepest layer)
+    model.backbone.body.layer4[2].conv2.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer4_block3_conv2')
+    )
+
+    # Hook for ResNet layer 4, third block's third convolution (deepest layer)
+    model.backbone.body.layer4[2].conv3.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'resnet_layer4_block3_conv3')
+    )
+
+    # Hook for FPN layer: the first convolution in FPN lateral connection from layer 1
+    model.backbone.fpn.inner_blocks[0].register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'fpn_lateral_layer1')
+    )
+
+    # Hook for FPN layer: the first convolution in FPN lateral connection from layer 2
+    model.backbone.fpn.inner_blocks[1].register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'fpn_lateral_layer2')
+    )
+
+    # Hook for FPN layer: the first convolution in FPN lateral connection from layer 3
+    model.backbone.fpn.inner_blocks[2].register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'fpn_lateral_layer3')
+    )
+
+    # Hook for FPN layer: the first convolution in FPN lateral connection from layer 4
+    model.backbone.fpn.inner_blocks[3].register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'fpn_lateral_layer4')
+    )
+
+    # Hook for FPN output layers after merging lateral and top-down features
+    model.backbone.fpn.layer_blocks[0].register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'fpn_output_layer1')
+    )
+
+    model.backbone.fpn.layer_blocks[1].register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'fpn_output_layer2')
+    )
+
+    model.backbone.fpn.layer_blocks[2].register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'fpn_output_layer3')
+    )
+
+    model.backbone.fpn.layer_blocks[3].register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'fpn_output_layer4')
+    )
+
+    # Hook for FPN extra layers (P6 and P7) if used in the model
+    # if hasattr(model.backbone.fpn, 'extra_blocks'):
+    #     model.backbone.fpn.extra_blocks[0].register_forward_hook(
+    #         lambda m, i, o: hook_func(m, i, o, 'fpn_extra_layer_p6')
+    #     )
+    #     model.backbone.fpn.extra_blocks[1].register_forward_hook(
+    #         lambda m, i, o: hook_func(m, i, o, 'fpn_extra_layer_p7')
+    #     )
+
+    # Region Proposal Network (RPN) hooks
+    # Hook for RPN head's convolutional layer for objectness score
+    model.rpn.head.conv.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'rpn_head_conv')
+    )
+
+    # Hook for RPN head's objectness prediction layer
+    model.rpn.head.cls_logits.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'rpn_cls_logits')
+    )
+
+    # Hook for RPN head's bounding box prediction layer
+    model.rpn.head.bbox_pred.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'rpn_bbox_pred')
+    )
+
+    # RoI Pooling or RoI Align hooks
+    # Hook for the RoI Align layer (if used in Mask R-CNN)
+    model.roi_heads.box_roi_pool.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'roi_box_pool')
+    )
+
+    # Box Head (classification and bounding box regression heads)
+    # Hook for fully connected layer in the box head's feature extractor
+    model.roi_heads.box_head.fc6.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'box_head_fc6')
+    )
+
+    model.roi_heads.box_head.fc7.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'box_head_fc7')
+    )
+
+    # Hook for box classifier
+    model.roi_heads.box_predictor.cls_score.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'box_predictor_cls_score')
+    )
+
+    # Hook for box regressor
+    model.roi_heads.box_predictor.bbox_pred.register_forward_hook(
+        lambda m, i, o: hook_func(m, i, o, 'box_predictor_bbox_pred')
+    )
+
+    # Mask Head (for Mask R-CNN)
+    # Hook for the first convolution in the mask head if mask predictions are enabled
+    if hasattr(model.roi_heads, 'mask_head'):
+        model.roi_heads.mask_head[0].register_forward_hook(
+            lambda m, i, o: hook_func(m, i, o, 'mask_head_conv1')
+        )
+
+    # Hook for the final layer of the mask predictor
+    if hasattr(model.roi_heads, 'mask_predictor'):
+        model.roi_heads.mask_predictor.mask_fcn_logits.register_forward_hook(
+            lambda m, i, o: hook_func(m, i, o, 'mask_predictor_fcn_logits')
+        )
 
 
 
-def extract_torch_tensor_layer_as_dict(layer_content, layer_name, i=0):
-    if isinstance(layer_content, OrderedDict):
-        layer_content = dict(layer_content)
-        
-    if isinstance(layer_content, (tuple, list)):
-        result_dict = {}
-        for idx, sub_content in enumerate(layer_content):
-            cur_res = extract_torch_tensor_layer_as_dict(sub_content, f"{layer_name}_{idx}", i)
-            result_dict.update(cur_res)  # Combine cur_res with existing dict
-        return result_dict
-    
-    elif isinstance(layer_content, torch.Tensor):
-        i += 1
-        return {f"{layer_name}_{i}": layer_content}
-    
-    elif isinstance(layer_content, dict):
-        result_dict = {}
-        for sub_name, sub_content in layer_content.items():
-            cur_res = extract_torch_tensor_layer_as_dict(sub_content, f"{layer_name}_{sub_name}", i)
-            result_dict.update(cur_res)  # Combine cur_res with existing dict
-        return result_dict
-    
+
+def plot_feature_map(tensor, should_save, save_path, should_show, title="Feature Map"):
+    if len(tensor.shape) == 4:
+        plot_image = tensor[0][0].cpu().numpy()
+    elif len(tensor.shape) == 2:
+        plot_image = tensor.cpu().numpy()
     else:
-        raise ValueError(f"Type is not supported: {type(layer_content)}")
+        raise ValueException(f"Tensor with shape: {tensor.shape} can't be plottet.")
 
+    plt.figure(figsize=(15, 10))
+    plt.imshow(plot_image, cmap='viridis')
+    # plt.colorbar()
+    plt.title(title)
+    plt.axis('off')
 
+    if should_save:
+        plt.savefig(os.path.join(save_path, f"{title}.jpg"))
+
+    if should_show:
+        plt.show()
+    
+    plt.clf()
+    plt.close()
 
 def visualize_insights(insights, should_save, save_path, name, should_show, max_aspect_ratio=5.0, max_cols=3, channel_limit=3, batch_limit=1):
-    # standardize type
-    # print(type(insights))
-    insights_dict = insights
-    
-    # Detach and bring back to CPU
-    insights_dict = {k: v.detach().cpu() for k, v in insights_dict.items()}
-    
-    for layer_name, insight in insights_dict.items():
-        if type(insight) != torch.Tensor and type(insight) !=  np.array:
-            print(f"Insight Visualizer: Can't visualize type '{type(insight)}'.")    # Value: {insight}")
-            # for i in insight:
-                # print(type(i))
-                # print(i)
-            continue
-        
-        # choose a subset to show -> PyTorch: (batch_size, channels, height, width)
-        if len(insight.size()) == 2:
-            
-            height = insight.shape[0]
-            width = insight.shape[1]
-            insight_prep = insight.cpu().numpy()
-            # crop if width and height are too different, to make it better visible
-            if width / height > max_aspect_ratio:
-                # Zu breit -> Breite beschneiden
-                new_width = int(height * max_aspect_ratio)
-                left_margin = (width - new_width) // 2
-                insight_prep = insight[:, left_margin:left_margin + new_width]
-            elif height / width > max_aspect_ratio:
-                # height too high
-                new_height = int(width * max_aspect_ratio)
-                top_margin = (height - new_height) // 2
-                insight_prep = insight[top_margin:top_margin + new_height, :]
-            else:
-                # in ratio 
-                insight_prep = insight[:, :]
-            
-            fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(20, 15))
-            fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.1, hspace=0.1)
-            
-            # ax.imshow(insight.cpu().numpy()[:height, :width], cmap="viridis")
-            ax.imshow(insight_prep, cmap="viridis")
-            ax.set_title(f"Feature-Map: {layer_name}")
-            ax.axis("off")
-
-            if should_save:
-                plt.savefig(os.path.join(save_path, f"{layer_name}_{name}.jpg"), dpi=fig.dpi)
-
-            if should_show:
-                print("\nShowing Ground Truth Visualization*")
-                plt.show()
-            else:
-                plt.clf()
-                plt.close(fig)
-        elif len(insight.shape) == 3:
-            # 3D Tensor: visualize each channel separately
-            
-            height = insight.shape[1]
-            width = insight.shape[2]
-            insight_prep = insight.cpu().numpy()
-            # crop if width and height are too different, to make it better visible
-            if width / height > max_aspect_ratio:
-                # Zu breit -> Breite beschneiden
-                new_width = int(height * max_aspect_ratio)
-                left_margin = (width - new_width) // 2
-                insight_prep = insight[:, :, left_margin:left_margin + new_width]
-            elif height / width > max_aspect_ratio:
-                # height too high
-                new_height = int(width * max_aspect_ratio)
-                top_margin = (height - new_height) // 2
-                insight_prep = insight[:, top_margin:top_margin + new_height, :]
-            else:
-                # in ratio 
-                insight_prep = insight
-            
-            channels = insight.shape[0]
-            if channel_limit is not None:
-                    channels = min(channel_limit, channels)
-                    
-            fig, axes = plt.subplots(1, channels, figsize=(20, 15))
-            for i in range(channels):
-                ax = axes[i] if channels > 1 else axes
-                # ax.imshow(insight[i, :height, :width], cmap="viridis")
-                ax.imshow(insight_prep[i, :, :], cmap="viridis")
-                ax.set_title(f"{layer_name} Ch. {i+1}")
-                ax.axis("off")
-            if should_save:
-                plt.savefig(os.path.join(save_path, f"{layer_name}_{name}.jpg"), dpi=fig.dpi)
-            if should_show:
-                plt.show()
-            else:
-                plt.clf()
-                plt.close(fig)
-
-        elif len(insight.shape) == 4:
-            # 4D Tensor: interpret as (batch, height, width, channels)
-            batch_size, height, width, channels = insight.shape
-            
-            height = insight.shape[1]
-            width = insight.shape[2]
-            insight_prep = insight.cpu().numpy()
-            # crop if width and height are too different, to make it better visible
-            if width / height > max_aspect_ratio:
-                # Zu breit -> Breite beschneiden
-                new_width = int(height * max_aspect_ratio)
-                left_margin = (width - new_width) // 2
-                insight_prep = insight[:, :, left_margin:left_margin + new_width, :]
-            elif height / width > max_aspect_ratio:
-                # height too high
-                new_height = int(width * max_aspect_ratio)
-                top_margin = (height - new_height) // 2
-                insight_prep = insight[:, top_margin:top_margin + new_height, :, :]
-            else:
-                # in ratio 
-                insight_prep = insight
-            
-            for batch_idx in range(batch_size):
-                if batch_idx >= batch_limit:
-                    break
-                
-                if channel_limit is not None:
-                    channels = min(channel_limit, channels)
-                    
-                if max_cols is not None:
-                    cols =  max(1, math.ceil(max_cols))
-                    rows =  max(1, math.ceil(channels / cols))
-                else:
-                    cols = max(1, math.ceil(math.sqrt(channels)))
-                    rows = max(1, math.ceil(channels / cols))
-                
-                fig, axes = plt.subplots(rows, cols, figsize=(cols * 3, rows * 3))
-                axes = axes.flatten()  # Flatten for easy indexing
-                
-                for i in range(channels):
-                    ax = axes[i]
-                    # ax.imshow(insight[batch_idx, :height, :width, i], cmap="viridis")
-                    ax.imshow(insight_prep[batch_idx, :, :, i], cmap="viridis")
-                    ax.set_title(f"{layer_name} Bt: {batch_idx+1} Ch. {i+1}")
-                    ax.axis("off")
-                
-                # Hide any remaining subplots if channels < rows * cols
-                for j in range(channels, len(axes)):
-                    axes[j].axis("off")
-
-                if should_save:
-                    plt.savefig(os.path.join(save_path, f"{layer_name}_batch{batch_idx+1}_{name}.jpg"), dpi=fig.dpi)
-                if should_show:
-                    plt.show()
-                else:
-                    plt.clf()
-                    plt.close(fig)
-        else:
-            raise Exception(f"Unexpected Insight Size. Size: {insight.size()}")
-        
-        
+    counter = 1
+    for layer_name, data in insights.items():
+        try:
+            plot_feature_map(data['output'], should_save, save_path, should_show, title=f"{name}_{counter:02}_{layer_name}")
+        except Exception as e:
+            print(f"Error during insight visualization of: {layer_name} with error: {e} and tensor: {data['output'].size()}")
+        counter += 1
         
 
 
