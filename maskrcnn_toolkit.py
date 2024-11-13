@@ -2288,17 +2288,50 @@ def register_maskrcnn_hooks(model):
 
 def plot_feature_map(tensor, should_save, save_path, should_show, title="Feature Map"):
     if len(tensor.shape) == 4:
-        plot_image = tensor[0][0].cpu().numpy()
+        num_cols = min(tensor.size()[0], 3)
+        num_rows = min(tensor.size()[1], 1)
+
+        if num_rows > num_cols:
+            num_rows = num_cols
+
+        fig, all_ax = plt.subplots(num_rows, num_cols, figsize=(15, 10))
+
+        for cur_col in range(num_cols):
+            for cur_row in range(num_rows):
+                feature_map_index_1 = cur_col
+                feature_map_index_2 = cur_row
+
+                if "mask_predictor" in title:
+                    title = title.replace("_logits", "")
+                    feature_map_index_1 = feature_map_index_1
+                    feature_map_index_2 = feature_map_index_2+1
+
+                # Extract the feature map for the ith sample
+                cur_image = tensor[feature_map_index_1, feature_map_index_2].detach().cpu().numpy()  # Select channel 0, detach from graph
+
+                if num_cols > 1 and num_rows == 1:
+                    ax = all_ax[cur_col]
+                elif num_cols == 1 and num_rows == 1:
+                    ax = all_ax
+                elif num_cols == 1 and num_rows > 1:
+                    ax = all_ax[cur_row]
+                elif num_cols > 1 and num_rows > 1:
+                    ax = all_ax[cur_row][cur_col]
+                else:
+                    raise Exception(f"Error during col: {cur_col}, row: {cur_row}")
+                
+                ax.imshow(cur_image, cmap='viridis')
+                ax.set_title(f'{title} {cur_col+1} {cur_row+1}')
+                ax.axis('off')
     elif len(tensor.shape) == 2:
         plot_image = tensor.cpu().numpy()
+        plt.figure(figsize=(15, 10))
+        plt.imshow(plot_image, cmap='viridis')
+        plt.title(title)
+        plt.axis('off')
     else:
         raise ValueException(f"Tensor with shape: {tensor.shape} can't be plottet.")
 
-    plt.figure(figsize=(15, 10))
-    plt.imshow(plot_image, cmap='viridis')
-    # plt.colorbar()
-    plt.title(title)
-    plt.axis('off')
 
     if should_save:
         plt.savefig(os.path.join(save_path, f"{title}.jpg"))
@@ -2306,6 +2339,7 @@ def plot_feature_map(tensor, should_save, save_path, should_show, title="Feature
     if should_show:
         plt.show()
     
+    plt.axis('off')
     plt.clf()
     plt.close()
 
