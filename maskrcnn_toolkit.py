@@ -136,20 +136,20 @@ if MODE == RUN_MODE.TRAIN:
 # INFERENCE #
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
-    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_10_160_epoch_045.pth"  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_160_160_epoch_050.pth"  # Path to the model weights file
     MASK_SCORE_THRESHOLD = 0.5
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
 
-    GROUND_PATH = "D:/3xM"   # "/mnt/morespace/3xM"    "D:/3xM/3xM_Test_Dataset/3xM_Bias_Experiment"
-    DATASET_NAME = "3xM_Dataset_10_80"    #  "3xM_Bias_Experiment", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
+    GROUND_PATH = "D:/3xM/3xM_Test_Dataset/"   # "/mnt/morespace/3xM"    "D:/3xM/3xM_Test_Dataset/3xM_Bias_Experiment"
+    DATASET_NAME = "3xM_Test_Dataset_known_known"    #  "known-known", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
     MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
     WIDTH = 1920                       # Image width for processing
     HEIGHT = 1080                      # Image height for processing
 
-    DATA_MODE = DATA_LOADING_MODE.SINGLE  # Mode for loading data -> All, Random, Range, Single Image
+    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 10                       # Number of images for random mode
     START_IDX = 0                      # Starting index for range mode
     END_IDX = 0                       # Ending index for range mode
@@ -163,11 +163,11 @@ if MODE == RUN_MODE.INFERENCE:
     SHOULD_VISUALIZE = False            # Whether to visualize the results
     SAVE_VISUALIZATION = False          # Save the visualizations to disk
     SHOW_VISUALIZATION = False          # Display the visualizations
-    SAVE_EVALUATION = False             # Save the evaluation results
+    SAVE_EVALUATION = True             # Save the evaluation results
     SHOW_EVALUATION = False             # Display the evaluation results
 
     SHOW_INSIGHTS = False
-    SAVE_INSIGHTS = True
+    SAVE_INSIGHTS = False
 
 
 
@@ -2805,15 +2805,15 @@ def calc_false_negative_rate(mask_1, mask_2):
 
 def plot_and_save_evaluation(pixel_acc, bg_fg_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name="instance_segmentation", should_print=True, should_save=True, save_path="./output"):
     eval_str = "\nEvaluation:\n"
-    eval_str += f"    - Pixel Accuracy = {round(pixel_acc * 100, 2)}%\n"
-    eval_str += f"    - Background Foreground Accuracy = {round(bg_fg_acc * 100, 2)}%\n"
-    eval_str += f"    - IoU = {iou}\n"
-    eval_str += f"    - Precision = {round(precision * 100, 2)}%\n        -> How many positive predicted are really positive\n        -> Only BG/FG\n"
-    eval_str += f"    - Recall = {round(recall * 100, 2)}%\n        -> How many positive were found\n        -> Only BG/FG\n"
-    eval_str += f"    - F1 Score = {round(f1_score * 100, 2)}%\n        -> Harmonic mean of Precision and Recall\n"
-    eval_str += f"    - Dice Coefficient = {round(dice * 100, 2)}%\n        -> Measure of overlap between predicted and actual masks\n"
-    eval_str += f"    - False Positive Rate (FPR) = {round(fpr * 100, 2)}%\n"
-    eval_str += f"    - False Negative Rate (FNR) = {round(fnr * 100, 2)}%\n"
+    if pixel_acc: eval_str += f"    - Pixel Accuracy = {round(pixel_acc * 100, 2)}%\n"
+    if bg_fg_acc: eval_str += f"    - Background Foreground Accuracy = {round(bg_fg_acc * 100, 2)}%\n"
+    if iou: eval_str += f"    - IoU = {iou}\n"
+    if precision: eval_str += f"    - Precision = {round(precision * 100, 2)}%\n        -> How many positive predicted are really positive\n        -> Only BG/FG\n"
+    if recall: eval_str += f"    - Recall = {round(recall * 100, 2)}%\n        -> How many positive were found\n        -> Only BG/FG\n"
+    if f1_score: eval_str += f"    - F1 Score = {round(f1_score * 100, 2)}%\n        -> Harmonic mean of Precision and Recall\n"
+    if dice: eval_str += f"    - Dice Coefficient = {round(dice * 100, 2)}%\n        -> Measure of overlap between predicted and actual masks\n"
+    if fpr: eval_str += f"    - False Positive Rate (FPR) = {round(fpr * 100, 2)}%\n"
+    if fnr: eval_str += f"    - False Negative Rate (FNR) = {round(fnr * 100, 2)}%\n"
 
     if should_print:
         print(eval_str)
@@ -2826,7 +2826,9 @@ def plot_and_save_evaluation(pixel_acc, bg_fg_acc, iou, precision, recall, f1_sc
     return eval_str
 
 
-def eval_pred(pred, ground_truth, name="instance_segmentation", should_print=True, should_save=True, save_path="./output"):
+def eval_pred(pred, ground_truth, name="instance_segmentation", should_print=True, should_save=True, save_path="./output",
+                should_pixel_acc=False, should_bg_fg_acc=False, should_iou=True,
+                should_f1_score=False, should_dice=False, should_fpr=False, should_fnr=False):
     """
     Evaluate prediction against ground truth by calculating pixel accuracy, IoU, precision, recall, F1-score, Dice coefficient, FPR, and FNR.
 
@@ -2840,16 +2842,16 @@ def eval_pred(pred, ground_truth, name="instance_segmentation", should_print=Tru
     --------
         tuple: Evaluation metrics including pixel accuracy, IoU, precision, recall, F1 score, Dice coefficient, FPR, and FNR.
     """
-    pixel_acc = calc_metric_with_object_matching(pred, ground_truth, calc_pixel_accuracy)
-    bg_fg_acc = calc_metric_with_object_matching(pred, ground_truth, calc_bg_fg_acc_accuracy)
-    iou = calc_metric_with_object_matching(pred, ground_truth, calc_intersection_over_union)
-    precision, recall = calc_precision_and_recall(pred, ground_truth, only_bg_and_fg=True)
-    f1_score = calc_f1_score(precision, recall)
-    dice = calc_metric_with_object_matching(pred, ground_truth, calc_dice_coefficient)
-    fpr = calc_metric_with_object_matching(pred, ground_truth, calc_false_positive_rate)
-    fnr = calc_metric_with_object_matching(pred, ground_truth, calc_false_negative_rate)
+    pixel_acc = calc_metric_with_object_matching(pred, ground_truth, calc_pixel_accuracy) if should_pixel_acc else None
+    bg_fg_acc = calc_metric_with_object_matching(pred, ground_truth, calc_bg_fg_acc_accuracy) if should_bg_fg_acc else None
+    iou = calc_metric_with_object_matching(pred, ground_truth, calc_intersection_over_union) if should_iou else None
+    precision, recall = calc_precision_and_recall(pred, ground_truth, only_bg_and_fg=True) if should_f1_score else [None, None]
+    f1_score = calc_f1_score(precision, recall) if should_f1_score else None
+    dice = calc_metric_with_object_matching(pred, ground_truth, calc_dice_coefficient) if should_dice else None
+    fpr = calc_metric_with_object_matching(pred, ground_truth, calc_false_positive_rate) if should_fpr else None
+    fnr = calc_metric_with_object_matching(pred, ground_truth, calc_false_negative_rate) if should_fnr else None
 
-    plot_and_save_evaluation(pixel_acc, bg_fg_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name=name, should_print=should_print, should_save=should_save, save_path=save_path)
+    # plot_and_save_evaluation(pixel_acc, bg_fg_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name=name, should_print=should_print, should_save=should_save, save_path=save_path)
 
     return pixel_acc, bg_fg_acc, iou, precision, recall, f1_score, dice, fpr, fnr
 
@@ -2882,18 +2884,18 @@ def update_evaluation_summary(sum_dict, results):
 
 def save_and_show_evaluation_summary(sum_dict, name="instance_segmentation", should_print=True, should_save=True, save_path="./output"):
 
-    pixel_acc = statistics.mean(sum_dict["pixel accuracy"])
-    bg_fg_acc = statistics.mean(sum_dict["background foreground accuracy"])
-    iou = statistics.mean(sum_dict["intersection over union"])
-    precision = statistics.mean(sum_dict["precision"])
-    recall = statistics.mean(sum_dict["recall"])
-    f1_score = statistics.mean(sum_dict["f1 score"])
-    dice = statistics.mean(sum_dict["dice"])
-    fpr = statistics.mean(sum_dict["false positive rate"])
-    fnr = statistics.mean(sum_dict["false negative rate"])
+    pixel_acc = statistics.mean(sum_dict["pixel accuracy"]) if len(sum_dict["pixel accuracy"].values()) > 0 and sum_dict["pixel accuracy"].values()[0] is not None else None
+    bg_fg_acc = statistics.mean(sum_dict["background foreground accuracy"]) if len(sum_dict["background foreground accuracy"].values()) > 0 and sum_dict["background foreground accuracy"].values()[0] is not None else None
+    iou = statistics.mean(sum_dict["intersection over union"]) if len(sum_dict["intersection over union"].values()) > 0 and sum_dict["intersection over union"].values()[0] is not None else None
+    precision = statistics.mean(sum_dict["precision"]) if len(sum_dict["precision"].values()) > 0 and sum_dict["precision"].values()[0] is not None else None
+    recall = statistics.mean(sum_dict["recall"]) if len(sum_dict["recall"].values()) > 0 and sum_dict["recall"].values()[0] is not None else None
+    f1_score = statistics.mean(sum_dict["f1 score"]) if len(sum_dict["f1 score"].values()) > 0 and sum_dict["f1 score"].values()[0] is not None else None
+    dice = statistics.mean(sum_dict["dice"]) if len(sum_dict["dice"].values()) > 0 and sum_dict["dice"].values()[0] is not None else None
+    fpr = statistics.mean(sum_dict["false positive rate"]) if len(sum_dict["false positive rate"].values()) > 0 and sum_dict["false positive rate"].values()[0] is not None else None
+    fnr = statistics.mean(sum_dict["false negative rate"]) if len(sum_dict["false negative rate"].values()) > 0 and sum_dict["false negative rate"].values()[0] is not None else None
 
     # save as txt file
-    plot_and_save_evaluation(pixel_acc, bg_fg_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name=name, should_print=should_print, should_save=should_save, save_path=save_path)
+    # plot_and_save_evaluation(pixel_acc, bg_fg_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name=name, should_print=should_print, should_save=should_save, save_path=save_path)
 
     # save dict as pickle file
     if should_save:
