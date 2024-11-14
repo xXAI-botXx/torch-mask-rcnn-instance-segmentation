@@ -136,7 +136,7 @@ if MODE == RUN_MODE.TRAIN:
 # INFERENCE #
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
-    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_160_160_epoch_050.pth"  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_80_160_epoch_050.pth"  # Path to the model weights file
     MASK_SCORE_THRESHOLD = 0.5
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
@@ -159,15 +159,17 @@ if MODE == RUN_MODE.INFERENCE:
 
     OUTPUT_DIR = "./output"            # Directory to save output files
     USE_MASK = True                    # Whether to use masks during inference
+    SHOULD_SAVE_MASK = False
     OUTPUT_TYPE = "png"                # Output format: 'numpy-array' or 'png'
     SHOULD_VISUALIZE = False            # Whether to visualize the results
     SAVE_VISUALIZATION = False          # Save the visualizations to disk
     SHOW_VISUALIZATION = False          # Display the visualizations
     SAVE_EVALUATION = True             # Save the evaluation results
     SHOW_EVALUATION = False             # Display the evaluation results
-
     SHOW_INSIGHTS = False
     SAVE_INSIGHTS = False
+
+    RESET_OUTPUT = False
 
 
 
@@ -2884,15 +2886,15 @@ def update_evaluation_summary(sum_dict, results):
 
 def save_and_show_evaluation_summary(sum_dict, name="instance_segmentation", should_print=True, should_save=True, save_path="./output"):
 
-    pixel_acc = statistics.mean(sum_dict["pixel accuracy"]) if len(sum_dict["pixel accuracy"].values()) > 0 and sum_dict["pixel accuracy"].values()[0] is not None else None
-    bg_fg_acc = statistics.mean(sum_dict["background foreground accuracy"]) if len(sum_dict["background foreground accuracy"].values()) > 0 and sum_dict["background foreground accuracy"].values()[0] is not None else None
-    iou = statistics.mean(sum_dict["intersection over union"]) if len(sum_dict["intersection over union"].values()) > 0 and sum_dict["intersection over union"].values()[0] is not None else None
-    precision = statistics.mean(sum_dict["precision"]) if len(sum_dict["precision"].values()) > 0 and sum_dict["precision"].values()[0] is not None else None
-    recall = statistics.mean(sum_dict["recall"]) if len(sum_dict["recall"].values()) > 0 and sum_dict["recall"].values()[0] is not None else None
-    f1_score = statistics.mean(sum_dict["f1 score"]) if len(sum_dict["f1 score"].values()) > 0 and sum_dict["f1 score"].values()[0] is not None else None
-    dice = statistics.mean(sum_dict["dice"]) if len(sum_dict["dice"].values()) > 0 and sum_dict["dice"].values()[0] is not None else None
-    fpr = statistics.mean(sum_dict["false positive rate"]) if len(sum_dict["false positive rate"].values()) > 0 and sum_dict["false positive rate"].values()[0] is not None else None
-    fnr = statistics.mean(sum_dict["false negative rate"]) if len(sum_dict["false negative rate"].values()) > 0 and sum_dict["false negative rate"].values()[0] is not None else None
+    pixel_acc = statistics.mean(sum_dict["pixel accuracy"]) if len(sum_dict["pixel accuracy"]) > 0 and sum_dict["pixel accuracy"][0] is not None else None
+    bg_fg_acc = statistics.mean(sum_dict["background foreground accuracy"]) if len(sum_dict["background foreground accuracy"]) > 0 and sum_dict["background foreground accuracy"][0] is not None else None
+    iou = statistics.mean(sum_dict["intersection over union"]) if len(sum_dict["intersection over union"]) > 0 and sum_dict["intersection over union"][0] is not None else None
+    precision = statistics.mean(sum_dict["precision"]) if len(sum_dict["precision"]) > 0 and sum_dict["precision"][0] is not None else None
+    recall = statistics.mean(sum_dict["recall"]) if len(sum_dict["recall"]) > 0 and sum_dict["recall"][0] is not None else None
+    f1_score = statistics.mean(sum_dict["f1 score"]) if len(sum_dict["f1 score"]) > 0 and sum_dict["f1 score"][0] is not None else None
+    dice = statistics.mean(sum_dict["dice"]) if len(sum_dict["dice"]) > 0 and sum_dict["dice"][0] is not None else None
+    fpr = statistics.mean(sum_dict["false positive rate"]) if len(sum_dict["false positive rate"]) > 0 and sum_dict["false positive rate"][0] is not None else None
+    fnr = statistics.mean(sum_dict["false negative rate"]) if len(sum_dict["false negative rate"]) > 0 and sum_dict["false negative rate"][0] is not None else None
 
     # save as txt file
     # plot_and_save_evaluation(pixel_acc, bg_fg_acc, iou, precision, recall, f1_score, dice, fpr, fnr, name=name, should_print=should_print, should_save=should_save, save_path=save_path)
@@ -2918,6 +2920,7 @@ def inference(
         num_workers=4,
         use_mask=True,
         use_depth=False,
+        should_save_mask=True,
         output_type="jpg",
         output_dir="./output",
         should_visualize=True,
@@ -2930,7 +2933,8 @@ def inference(
         mask_threshold=0.9,
         show_insights=False,
         save_insights=True,
-        verify_data=True
+        verify_data=True,
+        reset_output=False
     ):
     """
     Perform inference using a Mask R-CNN model with the provided dataset and parameters, while also
@@ -2992,11 +2996,15 @@ def inference(
 
     model_name = ".".join(weights_path.split("/")[-1].split(".")[:-1])
 
+    os.makedirs(output_dir, exist_ok=True)
     eval_sum_dict = dict()
     eval_dir = os.path.join(output_dir, "evaluations")
     os.makedirs(eval_dir, exist_ok=True)
     visualization_dir = os.path.join(output_dir, "visualizations")
     os.makedirs(visualization_dir, exist_ok=True)
+
+    if reset_output:
+        shutil.rmtree(output_dir)
 
     with torch.no_grad():
         # create model
@@ -3033,6 +3041,7 @@ def inference(
                 name = data[1][0]
 
             # inference
+            print(f"Inference with image '{name}'...")
             all_results = model(image)
             result = all_results[0]
             
@@ -3053,18 +3062,19 @@ def inference(
             result_masks = np.transpose(result_masks, (1, 2, 0))
             
             # save mask
-            print("Saving the inference segmentation mask...")
             os.makedirs(output_dir, exist_ok=True)
 
             # result = {key: value.cpu() for key, value in result.items()}
             cleaned_name = model_name + "_" + ".".join(name.split(".")[:-1])
 
             extracted_mask = extract_and_visualize_mask(result_masks, image=None, ax=None, visualize=False, color_map=None, soft_join=False)
-            if output_type in ["numpy", "npy"]:
-                np.save(os.path.join(output_dir, f'{cleaned_name}.npy'), extracted_mask)
-            else:
-                # recommended
-                cv2.imwrite(os.path.join(output_dir, f'{cleaned_name}.png'), extracted_mask)
+            if should_save_mask:
+                print("Saving the inference segmentation mask...")
+                if output_type in ["numpy", "npy"]:
+                    np.save(os.path.join(output_dir, f'{cleaned_name}.npy'), extracted_mask)
+                else:
+                    # recommended
+                    cv2.imwrite(os.path.join(output_dir, f'{cleaned_name}.png'), extracted_mask)
 
             # plot results
             if should_visualize:
@@ -3155,7 +3165,7 @@ def inference(
             plt.close()
 
         if use_mask:
-            save_and_show_evaluation_summary(eval_sum_dict, name="Complete-Evaluation", should_print=show_evaluation, should_save=save_evaluation, save_path=output_dir)
+            save_and_show_evaluation_summary(eval_sum_dict, name=model_name, should_print=show_evaluation, should_save=save_evaluation, save_path=eval_dir)
 
 
 
@@ -3246,6 +3256,7 @@ if __name__ == "__main__":
                 use_mask=USE_MASK,
                 use_depth=USE_DEPTH,
                 output_type=OUTPUT_TYPE,
+                should_save_mask=SHOULD_SAVE_MASK,
                 output_dir=OUTPUT_DIR,
                 should_visualize=SHOULD_VISUALIZE,
                 save_visualization=SAVE_VISUALIZATION,
@@ -3257,7 +3268,8 @@ if __name__ == "__main__":
                 mask_threshold=MASK_SCORE_THRESHOLD,
                 show_insights=SHOW_INSIGHTS,
                 save_insights=SAVE_INSIGHTS,
-                verify_data=VERIFY_DATA
+                verify_data=VERIFY_DATA,
+                reset_output=RESET_OUTPUT
         )
     
     
