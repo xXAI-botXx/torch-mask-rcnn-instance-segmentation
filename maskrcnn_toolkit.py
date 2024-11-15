@@ -82,7 +82,7 @@ MODE = RUN_MODE.INFERENCE
 # TRAINING #
 # -------- #
 if MODE == RUN_MODE.TRAIN:
-    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_10_160_epoch_045.pth"  # Path to the model weights file
+    WEIGHTS_PATH = None  # Path to the model weights file
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
 
@@ -142,7 +142,7 @@ if MODE == RUN_MODE.INFERENCE:
     VERIFY_DATA = False         # True is recommended
 
     GROUND_PATH = "D:/3xM/3xM_Test_Dataset/"   # "/mnt/morespace/3xM"    "D:/3xM/3xM_Test_Dataset/3xM_Bias_Experiment"
-    DATASET_NAME = "3xM_Test_Dataset_known_known"    #  "known-known", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
+    DATASET_NAME = "OCID-dataset-prep"    #  "known-known", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
     MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
@@ -1998,6 +1998,13 @@ def train(
 DNN_INSIGHTS = {}
 
 def hook_func(module, input, output, name):
+    global DNN_INSIGHTS
+    # make sure the dict exist
+    try:
+        DNN_INSIGHTS
+    except NameError:
+        DNN_INSIGHTS = {}
+
     try:
         DNN_INSIGHTS[name] = {
             # 'input': input[0].detach().cpu(),  # Store only the first input tensor
@@ -3068,6 +3075,9 @@ def inference(
             cleaned_name = model_name + "_" + ".".join(name.split(".")[:-1])
 
             extracted_mask = extract_and_visualize_mask(result_masks, image=None, ax=None, visualize=False, color_map=None, soft_join=False)
+            if len(extracted_mask.shape) == 3 and extracted_mask.shape[2] == 1:
+                extracted_mask = np.squeeze(extracted_mask, axis=2)
+        
             if should_save_mask:
                 print("Saving the inference segmentation mask...")
                 if output_type in ["numpy", "npy"]:
