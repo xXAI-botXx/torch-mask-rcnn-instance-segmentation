@@ -448,7 +448,8 @@ class Dual_Dir_Dataset(Dataset):
             self.verify_data()
 
         # update augmentations -> needed for background augmentation
-        self.transform.update(bg_value=self.background_value)
+        if self.transform:
+            self.transform.update(bg_value=self.background_value)
 
 
 
