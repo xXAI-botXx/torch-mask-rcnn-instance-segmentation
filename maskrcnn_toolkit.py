@@ -136,20 +136,20 @@ if MODE == RUN_MODE.TRAIN:
 # INFERENCE #
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
-    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_160_160_epoch_050.pth"  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_10_10_epoch_040.pth"  # Path to the model weights file
     MASK_SCORE_THRESHOLD = 0.5
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
 
-    GROUND_PATH = "D:/3xM/3xM_Test_Dataset/"   # "/mnt/morespace/3xM"    "D:/3xM/3xM_Test_Dataset/3xM_Bias_Experiment"
-    DATASET_NAME = "OCID-dataset-prep"    #  "known-known", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
+    GROUND_PATH = "D:/3xM/3xM_Test_Dataset/3xM_Bias_Experiment"   # "/mnt/morespace/3xM"    "D:/3xM/3xM_Test_Dataset/3xM_Bias_Experiment"
+    DATASET_NAME = "known-known"    #  "known-known", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
     MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
     WIDTH = 1920                       # Image width for processing
     HEIGHT = 1080                      # Image height for processing
 
-    DATA_MODE = DATA_LOADING_MODE.RANGE  # Mode for loading data -> All, Random, Range, Single Image
+    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 10                       # Number of images for random mode
     START_IDX = 0                      # Starting index for range mode
     END_IDX = 0                       # Ending index for range mode
@@ -158,7 +158,7 @@ if MODE == RUN_MODE.INFERENCE:
     NUM_WORKERS = 4                    # Number of workers for data loading
 
     OUTPUT_DIR = "./output"            # Directory to save output files
-    USE_MASK = True                    # Whether to use masks during inference
+    USE_MASK = False                    # Whether to use masks during inference
     SHOULD_SAVE_MASK = False
     OUTPUT_TYPE = "png"                # Output format: 'numpy-array' or 'png'
     SHOULD_VISUALIZE_MASK = True,
@@ -3018,15 +3018,21 @@ def inference(
 
     model_name = ".".join(weights_path.split("/")[-1].split(".")[:-1])
 
+    if reset_output:
+        try:
+            shutil.rmtree(output_dir)
+        except Exception:
+            pass
+
     os.makedirs(output_dir, exist_ok=True)
     eval_sum_dict = dict()
-    eval_dir = os.path.join(output_dir, "evaluations")
-    os.makedirs(eval_dir, exist_ok=True)
-    visualization_dir = os.path.join(output_dir, "visualizations")
-    os.makedirs(visualization_dir, exist_ok=True)
-
-    if reset_output:
-        shutil.rmtree(output_dir)
+    if use_mask and save_evaluation:
+        eval_dir = os.path.join(output_dir, "evaluations")
+        os.makedirs(eval_dir, exist_ok=True)
+    if save_visualization and (should_visualize_mask or should_visualize_mask_and_image):
+        visualization_dir = os.path.join(output_dir, "visualizations")
+        os.makedirs(visualization_dir, exist_ok=True)
+    
 
     with torch.no_grad():
         # create model
