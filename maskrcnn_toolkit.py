@@ -136,7 +136,7 @@ if MODE == RUN_MODE.TRAIN:
 # INFERENCE #
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
-    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_80_160_epoch_050.pth"  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_160_160_epoch_050.pth"  # Path to the model weights file
     MASK_SCORE_THRESHOLD = 0.5
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
@@ -149,7 +149,7 @@ if MODE == RUN_MODE.INFERENCE:
     WIDTH = 1920                       # Image width for processing
     HEIGHT = 1080                      # Image height for processing
 
-    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
+    DATA_MODE = DATA_LOADING_MODE.RANGE  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 10                       # Number of images for random mode
     START_IDX = 0                      # Starting index for range mode
     END_IDX = 0                       # Ending index for range mode
@@ -161,15 +161,16 @@ if MODE == RUN_MODE.INFERENCE:
     USE_MASK = True                    # Whether to use masks during inference
     SHOULD_SAVE_MASK = False
     OUTPUT_TYPE = "png"                # Output format: 'numpy-array' or 'png'
-    SHOULD_VISUALIZE = False            # Whether to visualize the results
-    SAVE_VISUALIZATION = False          # Save the visualizations to disk
+    SHOULD_VISUALIZE_MASK = True,
+    SHOULD_VISUALIZE_MASK_AND_IMAGE = True,
+    SAVE_VISUALIZATION = True          # Save the visualizations to disk
     SHOW_VISUALIZATION = False          # Display the visualizations
-    SAVE_EVALUATION = True             # Save the evaluation results
+    SAVE_EVALUATION = False             # Save the evaluation results
     SHOW_EVALUATION = False             # Display the evaluation results
     SHOW_INSIGHTS = False
     SAVE_INSIGHTS = False
 
-    RESET_OUTPUT = False
+    RESET_OUTPUT = True
 
 
 
@@ -181,6 +182,7 @@ if MODE == RUN_MODE.INFERENCE:
 ###########
 
 # basics
+import shutil
 from datetime import datetime, timedelta
 import time
 from IPython.display import clear_output
@@ -2431,7 +2433,7 @@ def transform_mask(mask, one_dimensional=False, input_color_map=None):
 
 
 
-def extract_and_visualize_mask(masks, image=None, ax=None, visualize=True, color_map=None, soft_join=False):
+def extract_and_visualize_mask(masks, image=None, ax=None, visualize=True, color_map=None, soft_join=True):
     """
     Extracts masks from a 3D mask array and optionally visualizes them.
 
@@ -2495,27 +2497,37 @@ def extract_and_visualize_mask(masks, image=None, ax=None, visualize=True, color
         color_image, color_map = transform_mask(result_mask, one_dimensional=False, input_color_map=color_map)
 
         if image is not None:
-            color_image = color_image.astype(int) 
-
             h, w, c = color_image.shape
+            image = (image * 255).astype(np.uint8)
 
-            if soft_join == False:
-                for cur_row_idx in range(h):
-                    for cur_col_idx in range(w):
-                        if color_image[cur_row_idx, cur_col_idx].sum() != 0:
-                            image[cur_row_idx, cur_col_idx] = color_image[cur_row_idx, cur_col_idx]
-                color_image = image
+            if soft_join:
+                alpha = 0.1
             else:
-                # remove black baclground
-                for cur_row_idx in range(h):
-                    for cur_col_idx in range(w):
-                        if color_image[cur_row_idx, cur_col_idx].sum() == 0:
-                            color_image[cur_row_idx, cur_col_idx] = image[cur_row_idx, cur_col_idx]
+                alpha = 0.0
 
-                # Blend the images
-                # color_image = cv2.addWeighted(image, alpha, color_image, beta, 0)
-                color_image = cv2.addWeighted(image, 1, color_image, 0.6, 0)
-                # color_image = cv2.add(color_image, image)
+            # for cur_row_idx in range(h):
+            #     for cur_col_idx in range(w):
+            #         if color_image[cur_row_idx, cur_col_idx].sum() == 0:
+            #             color_image[cur_row_idx, cur_col_idx] = image[cur_row_idx, cur_col_idx]
+            #         else:
+            #             # use formular: α⋅image+(1−α)⋅color_image
+            #             color_image[cur_row_idx, cur_col_idx] = (alpha * image[cur_row_idx, cur_col_idx] + (1 - alpha) * color_image[cur_row_idx, cur_col_idx]).astype(np.uint8)
+
+            #get all background pixels
+            black_pixels = np.all(color_image == [0, 0, 0], axis=-1)
+
+            # Set background to the image
+            color_image[black_pixels] = image[black_pixels]
+
+            # Set every not background pixel to blended value using formular: α⋅image+(1−α)⋅color_image
+            color_image[~black_pixels] = (
+                alpha * image[~black_pixels] +
+                (1 - alpha) * color_image[~black_pixels]
+            ).astype(np.uint8)
+
+            # print(color_image.dtype)
+            # print(image.dtype)
+                
 
         if ax is None:
             fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(20, 15), sharey=True)
@@ -2524,6 +2536,7 @@ def extract_and_visualize_mask(masks, image=None, ax=None, visualize=True, color
         ax.imshow(color_image, vmin=0, vmax=255)
         ax.set_title("Instance Segmentation Mask")
         ax.axis("off")
+        ax.set_facecolor('none')
 
         return result_mask, color_image, color_map
 
@@ -2931,7 +2944,8 @@ def inference(
         should_save_mask=True,
         output_type="jpg",
         output_dir="./output",
-        should_visualize=True,
+        should_visualize_mask=True,
+        should_visualize_mask_and_image=True,
         save_visualization=True,
         save_evaluation=True,
         show_visualization=False,
@@ -3088,50 +3102,81 @@ def inference(
                     cv2.imwrite(os.path.join(output_dir, f'{cleaned_name}.png'), extracted_mask)
 
             # plot results
-            if should_visualize:
+            if should_visualize_mask or should_visualize_mask_and_image:
                 print("Visualize your model...")
-                ncols = 3
+                # ncols = 3
 
-                fig, ax = plt.subplots(ncols=ncols, nrows=1, figsize=(20, 15), sharey=True)
-                fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=None)
+                # fig, ax = plt.subplots(ncols=ncols, nrows=1, figsize=(18, 5), sharey=True)
+                # fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=None)
                 
-                # plot original image
-                ax[0].imshow(image)
-                ax[0].set_title("Original")
-                ax[0].axis("off")
+                # # plot original image
+                # ax[0].imshow(image)
+                # ax[0].set_title("Original")
+                # ax[0].axis("off")
 
-                # plot mask alone
-                _, color_image, color_map = extract_and_visualize_mask(result_masks, image=None, ax=ax[1], visualize=True)
-                ax[1].set_title("Prediction Mask")
-                ax[1].axis("off")
+                # # plot mask alone
+                # _, color_image, color_map = extract_and_visualize_mask(result_masks, image=None, ax=ax[1], visualize=True)
+                # ax[1].set_title("Prediction Mask")
+                # ax[1].axis("off")
 
-                # plot result
-                _, _, _ = extract_and_visualize_mask(result_masks, image=image, ax=ax[2], visualize=True, color_map=color_map)    # color_map)
-                ax[2].set_title("Result")
-                ax[2].axis("off")
+                # # plot result
+                # _, _, _ = extract_and_visualize_mask(result_masks, image=image, ax=ax[2], visualize=True, color_map=color_map)    # color_map)
+                # ax[2].set_title("Result")
+                # ax[2].axis("off")
 
-                if save_visualization:
-                    os.makedirs(visualization_dir, exist_ok=True)
-                    plt.savefig(os.path.join(visualization_dir, f"{cleaned_name}.jpg"), dpi=fig.dpi)
+                # plot image and mask
+                if should_visualize_mask_and_image:
+                    fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(15, 10), sharey=True)
+                    fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=None)
 
+                    _, _, color_map = extract_and_visualize_mask(result_masks, image=image, ax=ax, visualize=True, color_map=None, soft_join=True)    # color_map)
+                    ax.set_title("Predicted Mask with input image")
+                    ax.axis("off")
+                    ax.set_facecolor('none')
 
-                if show_visualization:
-                    print("\nShowing Visualization*")
-                    plt.show()
-                else:
-                    plt.clf()
+                    fig.patch.set_visible(False) 
+
+                    if save_visualization:
+                        os.makedirs(visualization_dir, exist_ok=True)
+                        plt.savefig(os.path.join(visualization_dir, f"{cleaned_name}.jpg"), dpi=fig.dpi, transparent=True)
+
+                    if show_visualization:
+                        print("\nShowing Visualization*")
+                        plt.show()
+                        plt.clf()
+
+                # plot mask
+                if should_visualize_mask:
+                    fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(15, 10), sharey=True)
+                    fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=None)
+
+                    _, _, color_map = extract_and_visualize_mask(result_masks, image=None, ax=ax, visualize=True, color_map=color_map)    # color_map)
+                    ax.set_title("Predicted Mask")
+                    ax.axis("off")
+                    ax.set_facecolor('none')
+
+                    fig.patch.set_visible(False) 
+
+                    if save_visualization:
+                        os.makedirs(visualization_dir, exist_ok=True)
+                        plt.savefig(os.path.join(visualization_dir, f"{cleaned_name}_mask.jpg"), dpi=fig.dpi, transparent=True)
+
+                    if show_visualization:
+                        plt.show()
+                        plt.clf()
                     
-                # use other visualization
-                vis_img = visualize_results(image=image, predictions=all_results, score_threshold=0.5)
-                if save_visualization:
-                    cv2.imwrite(os.path.join(visualization_dir, f"{cleaned_name}_V2.jpg"), vis_img)
+                # # use other visualization
+                # vis_img = visualize_results(image=image, predictions=all_results, score_threshold=0.5)
+                # if save_visualization:
+                #     cv2.imwrite(os.path.join(visualization_dir, f"{cleaned_name}_V2.jpg"), vis_img)
                     
-                if show_visualization:
-                    plt.imshow(vis_img)
+                # if show_visualization:
+                #     plt.imshow(vis_img)
 
             # eval and plot ground truth comparisson
             if use_mask:
-                print("Evaluating your model...")
+                if show_evaluation or save_evaluation: 
+                    print("Evaluating your model...")
                 if show_evaluation:
                     print("Plot result in comparison to ground truth and evaluate with ground truth*")
                 # mask = cv2.resize(mask, extracted_mask.shape[1], extracted_mask.shape[0])
@@ -3139,7 +3184,7 @@ def inference(
                 eval_results = eval_pred(extracted_mask, masks_gt, name=cleaned_name, should_print=show_evaluation, should_save=save_evaluation, save_path=eval_dir)
                 eval_sum_dict = update_evaluation_summary(sum_dict=eval_sum_dict, results=eval_results)
 
-                if should_visualize:
+                if should_visualize_mask:
                     fig, ax = plt.subplots(ncols=2, nrows=1, figsize=(20, 15), sharey=True)
                     fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.1, hspace=0.1)
                     
@@ -3269,7 +3314,8 @@ if __name__ == "__main__":
                 output_type=OUTPUT_TYPE,
                 should_save_mask=SHOULD_SAVE_MASK,
                 output_dir=OUTPUT_DIR,
-                should_visualize=SHOULD_VISUALIZE,
+                should_visualize_mask=SHOULD_VISUALIZE_MASK,
+                should_visualize_mask_and_image=SHOULD_VISUALIZE_MASK_AND_IMAGE,
                 save_visualization=SAVE_VISUALIZATION,
                 save_evaluation=SAVE_EVALUATION,
                 show_visualization=SHOW_VISUALIZATION,
