@@ -82,8 +82,8 @@ MODE = RUN_MODE.INFERENCE
 # TRAINING #
 # -------- #
 if MODE == RUN_MODE.TRAIN:
-    WEIGHTS_PATH = None  # Path to the model weights file
-    USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
+    WEIGHTS_PATH = None         # Path to the model weights file
+    USE_DEPTH = False           # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
 
     GROUND_PATH = "/mnt/morespace/3xM"    # "/mnt/morespace/3xM" "D:/3xM" 
@@ -91,8 +91,6 @@ if MODE == RUN_MODE.TRAIN:
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
     MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
-    WIDTH = 1920   # 1920, 1024, 800, 640                # Image width for processing
-    HEIGHT = 1080  # 1080, 576, 450, 360                    # Image height for processing
 
     DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 100                       # Number of images for random mode
@@ -114,7 +112,6 @@ if MODE == RUN_MODE.TRAIN:
     WARM_UP_ITER = 2000
     LEARNING_RATE = 3e-3              # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
-    # DECAY = 0.0005                     # Weight decay for regularization
     BATCH_SIZE = 5                    # Batch size for training
     SHUFFLE = True                     # Shuffle the data during training
     
@@ -128,8 +125,6 @@ if MODE == RUN_MODE.TRAIN:
     APPLY_RANDOM_SCALE = True
     APPLY_RANDOM_BACKGROUND_MODIFICATION = True
     
-    # MASK_SCORE_THRESHOLD = 0.9
-    
 
 
 # --------- #
@@ -141,18 +136,16 @@ if MODE == RUN_MODE.INFERENCE:
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
 
-    GROUND_PATH = "D:/3xM/3xM_Test_Dataset/3xM_Bias_Experiment"   # "/mnt/morespace/3xM"    "D:/3xM/3xM_Test_Dataset/3xM_Bias_Experiment"
-    DATASET_NAME = "unknown-unknown"    #  "known-known", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
+    GROUND_PATH = "D:/3xM/3xM_Test_Dataset/"   # "/mnt/morespace/3xM"    "D:/3xM/3xM_Test_Dataset/3xM_Bias_Experiment"
+    DATASET_NAME = "OCID-dataset-prep"    #  "known-known", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
     MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
-    WIDTH = 1920                       # Image width for processing
-    HEIGHT = 1080                      # Image height for processing
 
-    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
+    DATA_MODE = DATA_LOADING_MODE.RANGE  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 10                       # Number of images for random mode
     START_IDX = 0                      # Starting index for range mode
-    END_IDX = 0                       # Ending index for range mode
+    END_IDX = 10                       # Ending index for range mode
     IMAGE_NAME = "3xM_10000_10_80.png"     # Specific image name for single mode
 
     NUM_WORKERS = 4                    # Number of workers for data loading
@@ -208,12 +201,9 @@ from torch.optim.lr_scheduler import OneCycleLR, CyclicLR, LambdaLR
 
 import torchvision
 from torchvision.models.detection import MaskRCNN
-# from torchvision.models.detection import maskrcnn_resnet50_fpn
-# from torchvision.models.detection import MaskRCNN_ResNet50_FPN_Weights
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from torchvision.models import ResNet50_Weights
-# from torchvision.transforms import functional as F
 import torchvision.transforms as T
 
 # experiment tracking
@@ -261,7 +251,6 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
     """
     backbone = resnet_fpn_backbone(backbone_name='resnet50', weights=ResNet50_Weights.IMAGENET1K_V2) # ResNet50_Weights.IMAGENET1K_V1)
     model = MaskRCNN(backbone, num_classes=2)  # 2 Classes (Background + 1 Object)
-    # odel = maskrcnn_resnet50_fpn(weights=MaskRCNN_ResNet50_FPN_Weights.DEFAULT, num_classes=2)    # ResNet50_Weights.DEFAULT
 
     if use_4_channels:
         # Change the first Conv2d-Layer for 4 Channels
@@ -278,13 +267,11 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
         with torch.no_grad():
             new_conv1.weight[:, :3, :, :] = model.backbone.body.conv1.weight  # Copy old 3 Channels
             new_conv1.weight[:, 3:, :, :] = model.backbone.body.conv1.weight[:, :1, :, :]  # Init new 4.th Channel with the one old channel
-            # torch.nn.init.kaiming_normal_(new_conv1.weight[:, 3:, :, :], mode='fan_out', nonlinearity='relu')
 
         
         model.backbone.body.conv1 = new_conv1  # Replace the old Conv1 Layer with the new one
         
         # Modify the transform to handle 4 channels
-        #       - Replace the transform in the model with a custom one
         model.transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
         
     # adjust loss weights
@@ -378,8 +365,6 @@ class Dual_Dir_Dataset(Dataset):
     use_mask (bool): Flag indicating whether to load mask images. Default is True.
     use_depth (bool): Flag indicating whether to load depth images. Default is False.
     log_path (str, optional): Path for logging data verification results. Default is None.
-    width (int): Width to which images should be resized (if resizing is implemented). Default is 1920.
-    height (int): Height to which images should be resized (if resizing is implemented). Default is 1080.
 
 
     Attributes:
@@ -418,8 +403,6 @@ class Dual_Dir_Dataset(Dataset):
                 use_mask=True,
                 use_depth=False,
                 log_path=None,
-                width=1920,
-                height=1080,
                 should_print=True,
                 should_log=True,
                 should_verify=True
@@ -432,8 +415,6 @@ class Dual_Dir_Dataset(Dataset):
         self.use_mask = use_mask
         self.use_depth = use_depth
         self.log_path = log_path
-        self.width = width
-        self.height = height
         self.should_print = should_print
         self.should_log = should_log,
         self.background_value = 1    # will be auto setted in verification
@@ -453,6 +434,8 @@ class Dual_Dir_Dataset(Dataset):
         if self.transform:
             self.transform.update(bg_value=self.background_value)
 
+        self.extract_width_height()
+
 
 
     def __len__(self):
@@ -471,19 +454,16 @@ class Dual_Dir_Dataset(Dataset):
         if image is None:
             raise FileNotFoundError(f"Error during data loading: there is no '{img_path}'")
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        # image = resize_with_padding(image, target_h=self.height, target_w=self.width, method=cv2.INTER_LINEAR)
         
         if self.use_depth:
             depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
             if len(depth.shape) > 2:
                 _, depth, _, _ =  cv2.split(depth)
-            # depth = resize_with_padding(depth, target_h=self.height, target_w=self.width, method=cv2.INTER_LINEAR)
 
         if self.use_mask:
             mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)    # cv2.IMREAD_GRAYSCALE)
             if len(mask.shape) > 2:
                 mask = self.rgb_mask_to_grey_mask(rgb_img=mask, verify=False)
-            # mask = resize_with_padding(mask, target_h=self.height, target_w=self.width, method=cv2.INTER_NEAREST)
 
         # Apply transformations
         if self.transform:
@@ -536,27 +516,6 @@ class Dual_Dir_Dataset(Dataset):
                     "boxes": self.get_bounding_boxes(masks),
                     "labels": torch.ones(masks.shape[0], dtype=torch.int64)  # Set all IDs to 1 -> just one class type
                 }
-                
-            # FIXME for debugging
-            # fig, ax = plt.subplots(ncols=2, nrows=1, figsize=(20, 15), sharey=True)
-            # fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=None)
-            
-            # # plot original image
-            # print(image.shape)
-            # print(target["masks"].shape)
-            # ax[0].imshow(np.transpose(image.cpu().numpy(), (1, 2, 0)))
-            # ax[0].set_title("Original")
-            # ax[0].axis("off")
-
-            # # plot mask alone
-            # extract_and_visualize_mask(np.transpose(target["masks"].cpu().numpy(), (1, 2, 0)), image=None, ax=ax[1], visualize=True)
-            # ax[1].set_title("Prediction Mask")
-            # ax[1].axis("off")
-            
-            # plt.savefig("./DEBUGGING_PLOT.jpg")
-            # plt.clf()
-            
-            # FIXME debugging end
             
             return image, target, img_name
         else:
@@ -564,12 +523,37 @@ class Dual_Dir_Dataset(Dataset):
 
 
 
+    def extract_width_height(self):
+        for img_name in self.img_names:
+            try:
+                img_path = os.path.join(self.img_dir, img_name)
+                
+                image = cv2.imread(img_path)
+                if image is None:
+                    raise FileNotFoundError(f"Error during data loading: there is no '{img_path}'")
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+                self.width = image.shape[1]
+                self.height = image.shape[0]
+
+                break
+            except Exception:
+                pass
+            
+
+
+    def size(self):
+        try:
+            return self.height, self.width
+        except Exception:
+            self.extract_width_height()
+            return self.height, self.width
+
+
     def get_bounding_boxes(self, masks):
         boxes = []
         
         for mask in masks:
-            # object = np.unique(mask[mask != 0])
-            # if len(object) > 1:
             pos = np.where(mask == 1)
             x_min = np.min(pos[1])
             x_max = np.max(pos[1])
@@ -630,8 +614,6 @@ class Dual_Dir_Dataset(Dataset):
             image_exists = os.path.exists(image_path) and os.path.isfile(image_path) and any([image_path.endswith(ending) for ending in [".png", ".jpg", ".jpeg"]])
             
             if image_exists:
-                # rgb_img = cv2.imread(image_path)
-                # rgb_shape = rgb_img.shape[:2]  # Height and Width (ignore channels)
                 images_found += 1
             else:
                 images_not_found += [image_path]
@@ -643,15 +625,6 @@ class Dual_Dir_Dataset(Dataset):
 
                 if depth_exists:
                     depth_found += 1
-                    # if image_exists:
-                    #     depth_img = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
-                    #     depth_shape = depth_img.shape[:2]
-                    #     if rgb_shape == depth_shape:
-                    #         depth_found += 1
-                    #     else:
-                    #         depth_not_found += [depth_path]
-                    # else:
-                    #     depth_found += 1
                 else:
                     depth_not_found += [depth_path]
 
@@ -659,20 +632,6 @@ class Dual_Dir_Dataset(Dataset):
             if self.use_mask:
                 mask_path = os.path.join(self.mask_dir, cur_image)
                 mask_exists = os.path.exists(mask_path) and os.path.isfile(mask_path) and any([mask_path.endswith(ending) for ending in [".png", ".jpg", ".jpeg"]])
-                # check if mask has an object
-                # if mask_exists:
-                #     mask_img = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)    # cv2.IMREAD_GRAYSCALE)
-                #     # if len(mask_img.shape) > 2:
-                #     #     mask = self.rgb_mask_to_grey_mask(rgb_img=mask_img, verify=False)
-
-                #     if len(np.unique(mask_img)) <= 1:
-                #         mask_exists = False
-                    # else:
-                    #     if image_exists:
-                    #         mask_shape = mask_img.shape[:2]
-
-                    #         if rgb_shape != mask_shape:
-                    #             mask_exists = False
                 
                 # get cur bg value (it also could be a large object)
                 if mask_exists:
@@ -705,15 +664,6 @@ class Dual_Dir_Dataset(Dataset):
             else:
                 if image_exists:
                     updated_images += [cur_image]
-                    
-            # print
-            # progress = round((idx / all_images_size), 2)
-            # progress = (idx / all_images_size)
-            # if (progress % 0.10) <= 0.001 == 0:
-            #     progress_bar_size = 10
-            #     progress_bar = int(progress * progress_bar_size)
-            #     white_spaces = int(progress_bar_size - progress_bar)
-            #     log(self.log_path, f"[{'#'*progress_bar}{' '*white_spaces}]", should_log=self.should_log, should_print=self.should_print)
 
         # Log/Print Verification Results
         log(self.log_path, f"\n> > > Images < < <\nFound: {round((images_found/len(self.img_names))*100, 2)}% ({images_found}/{len(self.img_names)})", should_log=self.should_log, should_print=self.should_print)
@@ -1087,21 +1037,22 @@ class Random_Scale:
 
 
 class Random_Background_Modification:
-    def __init__(self, bg_value=1, width=1920, height=1080, probability=0.2):
+    def __init__(self, bg_value=1, probability=0.2):
         self.bg_value = bg_value
-        self.width = width
-        self.height = height
         self.probability = probability
     
     def __call__(self, images):
         rgb_img, depth_img, mask_img = images
         rgb_img, depth_img, mask_img = pil_to_cv2([rgb_img, depth_img, mask_img])
+
+        width = rgb_img.shape[1]
+        height = rgb_img.shape[0]
         
         if random.random() < self.probability:
             mode = random.choice(["noise", "checkerboard", "gradient pattern", "color shift"])
 
             if mode == "noise":
-                background_pattern = np.random.randint(0, 256, (self.height, self.width, 3), dtype=np.uint8)
+                background_pattern = np.random.randint(0, 256, (height, width, 3), dtype=np.uint8)
             elif mode == "checkerboard":
                 checker_size = random.choice([5, 10, 25, 50])
                 color1 = random.randint(180, 255)
@@ -1110,22 +1061,22 @@ class Random_Background_Modification:
                 color2 = [color2, color2, color2]    # Darker Color
 
                 # Create the checkerboard pattern
-                background_pattern = np.zeros((self.height, self.width, 3), dtype=np.uint8)
-                for i in range(0, self.height, checker_size):
-                    for j in range(0, self.width, checker_size):
+                background_pattern = np.zeros((height, width, 3), dtype=np.uint8)
+                for i in range(0, height, checker_size):
+                    for j in range(0, width, checker_size):
                         color = color1 if (i // checker_size + j // checker_size) % 2 == 0 else color2
                         background_pattern[i:i+checker_size, j:j+checker_size] = color
             elif mode == "gradient pattern":
-                background_pattern = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+                background_pattern = np.zeros((height, width, 3), dtype=np.uint8)
 
                 # Generate a gradient
                 if random.random() > 0.5:
-                    for i in range(self.height):
-                        color_value = int(255 * (i / self.height))
+                    for i in range(height):
+                        color_value = int(255 * (i / height))
                         background_pattern[i, :] = [color_value, color_value, color_value]
                 else:
-                    for i in range(self.width):
-                        color_value = int(255 * (i / self.width))
+                    for i in range(width):
+                        color_value = int(255 * (i / width))
                         background_pattern[:, i] = [color_value, color_value, color_value]
             else:
                 B, G, R = cv2.split(rgb_img)
@@ -1200,7 +1151,7 @@ class Resize:
 
 
 class Train_Augmentations:
-    def __init__(self, width, height,
+    def __init__(self, 
                  apply_random_flip, apply_random_rotation,
                  apply_random_crop, apply_random_brightness_contrast,
                  apply_random_gaussian_noise, apply_random_gaussian_blur,
@@ -1240,8 +1191,7 @@ class Train_Augmentations:
             info_str += "Random Scale, "
 
         if apply_random_background_modification:
-            # added through the update function
-            # transformations += [Random_Background_Modification(bg_value=1, width=width, height=height)]
+            # added later through the update function -> need the bg value
             info_str += "Random Background Modification, "
             
             
@@ -1250,11 +1200,7 @@ class Train_Augmentations:
         else:
             log(log_path, info_str[:-2], should_log=should_log, should_print=should_print)
     
-        if not apply_random_background_modification:
-            transformations += [Resize(width=width, height=height)]
     
-        self.width = width
-        self.height = height
         self.transformations = transformations
         self.augmentations = T.Compose(transformations)
         self.apply_random_background_modification = apply_random_background_modification
@@ -1264,36 +1210,9 @@ class Train_Augmentations:
             raise ValueError("If choosing apply_random_background_modification = True,you have to pass a background value to the augmentation update.")
 
         if self.apply_random_background_modification:
-            self.transformations += [Random_Background_Modification(bg_value=bg_value, width=self.width, height=self.height)]
-
-        if self.apply_random_background_modification:
-            self.transformations += [Resize(width=self.width, height=self.height)]
+            self.transformations += [Random_Background_Modification(bg_value=bg_value)]
     
         self.augmentations = T.Compose(self.transformations)
-
-    def __call__(self, rgb_img, depth_img, mask_img):
-        
-        # Convert to Pillow
-        rgb_img, depth_img, mask_img = cv2_to_pil([rgb_img, depth_img, mask_img])
-        
-        # Apply Transformations/Augmentations
-        rgb_img, depth_img, mask_img = self.augmentations((rgb_img, depth_img, mask_img))
-        
-        # Convert back to cv2
-        rgb_img, depth_img, mask_img = pil_to_cv2([rgb_img, depth_img, mask_img])
-        
-        return rgb_img, depth_img, mask_img
-
-
-
-class Inference_Augmentations:
-    def __init__(self, width, height):
-        self.augmentations = T.Compose([
-            Resize(width=width, height=height),
-        ])
-
-    def update(self, bg_value=None):
-        pass
 
     def __call__(self, rgb_img, depth_img, mask_img):
         
@@ -1499,18 +1418,18 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
     # Create Mask-RCNN with Feature Pyramid Network (FPN) as backbone
     if should_log:
         log(log_path, "Create the model and preparing for training...")
+    height, width = dataset.size()
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    model = load_maskrcnn(weights_path=weights_path, use_4_channels=use_depth, pretrained=False, log_path=log_path, should_log=should_log, should_print=should_log)
+    model = load_maskrcnn(
+                weights_path=weights_path, use_4_channels=use_depth, pretrained=False, 
+                log_path=log_path, should_log=should_log, should_print=should_log,
+                min_size=height, max_size=width
+            )
     model = model.to(device)
 
     # Optimizer
-    # params = [p for p in model.parameters() if p.requires_grad]
-    # optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
-    # optimizer_name = "adam"
     optimizer = SGD(model.parameters(), lr=learning_rate, momentum=momentum, nesterov=True)  #, weight_decay=decay)
     
-    # scheduler = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset)//batch_size, epochs=num_epochs//4)
-    # scheduler = CyclicLR(optimizer=optimizer, base_lr=learning_rate, max_lr=5e-4, step_size_up=int((len(dataset)/batch_size)/2)) 
     def warm_up_and_cool_down_lr(steps):
         # warm up phase -> increase learn rate
         if steps < warm_up_iter:
@@ -1524,10 +1443,7 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
     # Experiment Tracking
     if experiment_tracking:
         # Add model for tracking
-        # batch = next(iter(data_loader))
-        # images, target, _ = batch
-        # single_example = torch.zeros_like(images[0]).tolist()
-        mlflow.pytorch.log_model(model, "Mask R-CNN")    # , conda_env="./conda_env.yml")    # , input_example=single_example)
+        mlflow.pytorch.log_model(model, "Mask R-CNN")
 
         # Init TensorBoard writer
         writer = SummaryWriter()
@@ -1569,9 +1485,6 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
                         with torch.no_grad():
                             outputs = model(images)
                         for output, target in zip(outputs, targets):
-                            # print(f"Mask-GT: {target['masks'].cpu().numpy().shape}")
-                            # print(f"Results-Mask: {output['masks'].cpu().numpy().shape}")
-                            
                             masks_gt = target['masks'].cpu().numpy()
                             masks_gt = np.transpose(masks_gt, (1, 2, 0))
                             extracted_masks_gt = extract_and_visualize_mask(masks_gt, image=None, ax=None, visualize=False, color_map=None, soft_join=False)
@@ -1618,7 +1531,6 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
                     mlflow.log_metric(f"learnrate_{parameter_name}", param_group['lr'], step=iteration)
                     writer.add_scalar(f"learnrate_{parameter_name}", param_group['lr'], iteration)
                 else:
-                    # current_learnrate = scheduler.get_lst_lr()[0]
                     current_learnrate = optimizer.param_groups[0]['lr']
                     learnrate_str += f" {current_learnrate:.0e}"
                     mlflow.log_metric(f"learnrate", current_learnrate, step=iteration)
@@ -1639,13 +1551,6 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
                         loss_avgs[key] = [value.cpu().detach().numpy()]
 
                 cur_total_loss = sum([value.cpu().detach().numpy() for value in loss_dict.values()])
-
-                # update optimizer and scheduler if near the goal
-                # if cur_total_loss < 0.45 and optimizer_name == "adam":
-                #     log(log_path, "\nTrain Update: Switched Optimizer from Adam to SGD\n", should_log=should_log, should_print=should_log)
-                #     optimizer = SGD(params=model.parameters(), lr=learning_rate, momentum=momentum, weight_decay=decay)
-                #     scheduler = OneCycleLR(optimizer=optimizer, max_lr=0.001, steps_per_epoch=len(dataset), epochs=num_epochs)
-                #     optimizer_name = "sgd"
 
                 if experiment_tracking:
                     # make experiment tracking
@@ -1693,7 +1598,6 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
                         eval_sum_dict = dict()
 
                 iteration += 1
-                # torch.cuda.empty_cache()
 
             # Save Model
             if should_save and epoch % 5 == 0:
@@ -1758,7 +1662,6 @@ def train(
         num_epochs=20,
         learning_rate=0.005,
         momentum=0.9,
-        # decay=0.0005,
         warm_up_iter=100,
         batch_size = 2,
         img_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb',
@@ -1774,10 +1677,7 @@ def train(
         use_depth=False,
         using_experiment_tracking=False,
         create_new_experiment=True,    
-        # experiment_id=12345,
         experiment_name='3xM Instance Segmentation',
-        width=1920,
-        height=1080,
         apply_random_flip=True, 
         apply_random_rotation=True,
         apply_random_crop=True, 
@@ -1836,10 +1736,6 @@ def train(
         If True, creates a new experiment in MLflow. Default is True.
     experiment_name : str, optional
         Name of the MLflow experiment. Default is '3xM Instance Segmentation'.
-    width : int, optional
-        Width of the input images for augmentation. Default is 1920.
-    height : int, optional
-        Height of the input images for augmentation. Default is 1080.
     apply_random_flip : bool, optional
         Should the data augmentation random flip should be applied. Defaut is True.
     apply_random_rotation : bool, optional
@@ -1885,8 +1781,7 @@ def train(
 
     # Dataset and DataLoader
     log(log_path, "Loading the data...")
-    augmentation = Train_Augmentations(width=width, height=height, 
-                                        apply_random_flip=apply_random_flip, 
+    augmentation = Train_Augmentations(apply_random_flip=apply_random_flip, 
                                         apply_random_rotation=apply_random_rotation,
                                         apply_random_crop=apply_random_crop, 
                                         apply_random_brightness_contrast=apply_random_brightness_contrast,
@@ -1900,7 +1795,7 @@ def train(
     dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=augmentation, 
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
                                 data_mode=data_mode, use_mask=True, use_depth=use_depth, log_path=log_path,
-                                width=width, height=height, should_log=True, should_print=True, should_verify=verify_data)
+                                should_log=True, should_print=True, should_verify=verify_data)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, collate_fn=collate_fn)
 
     # Experiment Tracking
@@ -1912,7 +1807,6 @@ def train(
                 log(log_path, f"Created Experiment '{experiment_name}' ID: {EXPERIMENT_ID}")
             except mlflow.exceptions.MlflowException:
                 log(log_path, "WARNING: Please set 'CREATE_NEW_EXPERIMENT' to False!")
-            # log(log_path, f"IMPORTANT: You should set now 'CREATE_NEW_EXPERIMENT' to False and 'EXPERIMENT_ID' to {experiment_id}.")
 
         def is_mlflow_active():
             return mlflow.active_run() is not None
@@ -1926,11 +1820,8 @@ def train(
             raise ValueError("First you have to create a mlflow experiment, you can go to the Variable Section in this notebook.\
                             There you just set 'CREATE_NEW_EXPERIMENT' to True, and run the code there and follow the isntruction there. it's easy, don't worry.\
                             \nAlternativly you can set 'USING_EXPERIMENT_TRACKING' to False.")
-        # experiment_id = existing_experiment.experiment_id
-        # log(log_path, f"Current Experiment ID: {experiment_id}")
         log(log_path, f"Loaded Experiment-System: {experiment_name}")
 
-        #mlflow.set_tracking_uri(None)
         mlflow.set_experiment(experiment_name)
 
         if using_experiment_tracking:
@@ -1943,13 +1834,10 @@ def train(
                 mlflow.log_param("learnrate", learning_rate)
                 mlflow.log_param("momentum", momentum)
                 mlflow.log_param("warm_up_iter", warm_up_iter)
-                # mlflow.log_param("decay", decay)
 
                 mlflow.log_param("images_path", img_dir)
                 mlflow.log_param("masks_path", mask_dir)
                 mlflow.log_param("depth_path", depth_dir)
-                mlflow.log_param("img_width", width)
-                mlflow.log_param("img_height", height)
 
                 mlflow.log_param("data_shuffle", shuffle)
                 mlflow.log_param("data_mode", data_mode.value)
@@ -2010,100 +1898,12 @@ def hook_func(module, input, output, name):
 
     try:
         DNN_INSIGHTS[name] = {
-            # 'input': input[0].detach().cpu(),  # Store only the first input tensor
             'output': output.detach().cpu()
         }
     except AttributeError as e:
         print(f"Error: {e} Data: {input}")
 
 def register_maskrcnn_hooks(model):
-    # # Attach hooks for backbone (ResNet layers)
-    # model.backbone.body.layer1.register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'backbone_layer1'))
-    # model.backbone.body.layer4.register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'backbone_layer4'))
-
-    # # Attach hooks for FPN layers
-    # model.backbone.fpn.inner_blocks[0].register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'fpn_inner_block_0'))
-
-    # # Attach hooks for RPN (head)
-    # model.rpn.head.conv[0].register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'rpn_conv'))
-    # model.rpn.head.cls_logits.register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'rpn_cls_logits'))
-    # model.rpn.head.bbox_pred.register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'rpn_bbox_pred'))
-
-    # # Attach hooks for ROI heads
-    # model.roi_heads.box_head.fc6.register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'roi_fc6'))
-    # model.roi_heads.mask_head[0][0].register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'mask_head_0'))
-    # model.roi_heads.mask_predictor.conv5_mask.register_forward_hook(lambda m, i, o: hook_func(m, i, o, 'mask_conv5'))
-
-    ###############################################################################################################################
-    # Grad-CAM für Feature-Maps der Backbone-ResNet-Layer
-    # model.backbone.body.layer4[2].conv3.register_forward_hook(
-    #     lambda m, i, o: hook_func(m, i, o, 'resnet_layer4_conv3')
-    # )
-
-    # # Visualisierung der Feature Pyramid Network (FPN) Levels
-    # model.backbone.fpn.inner_blocks[0].register_forward_hook(
-    #     lambda m, i, o: hook_func(m, i, o, 'fpn_inner_block_P2')
-    # )
-    # model.backbone.fpn.layer_blocks[0].register_forward_hook(
-    #     lambda m, i, o: hook_func(m, i, o, 'fpn_layer_block_P2')
-    # )
-
-    # model.backbone.fpn.inner_blocks[1].register_forward_hook(
-    #     lambda m, i, o: hook_func(m, i, o, 'fpn_inner_block_P3')
-    # )
-    # model.backbone.fpn.layer_blocks[1].register_forward_hook(
-    #     lambda m, i, o: hook_func(m, i, o, 'fpn_layer_block_P3')
-    # )
-
-    # # Erfassen der RPN-Anker (Anchor Boxen)
-    # model.rpn.head.cls_logits.register_forward_hook(
-    #     lambda m, i, o: hook_func(m, i, o, 'rpn_cls_logits')
-    # )
-    # model.rpn.head.bbox_pred.register_forward_hook(
-    #     lambda m, i, o: hook_func(m, i, o, 'rpn_bbox_pred')
-    # )
-
-    # # RoI Align - Grid-Erzeugung für jedes RoI
-    # model.roi_heads.box_roi_pool.register_forward_hook(
-    #     lambda m, i, o: hook_func(m, i, o, 'roi_align')
-    # )
-
-    # # Vergleich der Klassifikations- und Regressions-Ergebnisse im ROI Head
-    # model.roi_heads.box_head.fc7.register_forward_hook(
-    #     lambda m, i, o: hook_func(m, i, o, 'roi_box_head_fc7')
-    # )
-    # model.roi_heads.box_predictor.cls_score.register_forward_hook(
-    #     lambda m, i, o: hook_func(m, i, o, 'roi_cls_score')
-    # )
-    # model.roi_heads.box_predictor.bbox_pred.register_forward_hook(
-    #     lambda m, i, o: hook_func(m, i, o, 'roi_bbox_pred')
-    # )
-
-    # # Masken-Visualisierung in verschiedenen Masken-Layern
-    # model.roi_heads.mask_head.mask_fcn_logits.register_forward_hook(
-    #     lambda m, i, o: hook_func(m, i, o, 'mask_fcn_logits')
-    # )
-
-    # # Proben der Gewichte in den Backbone-Schichten (ResNet)
-    # model.backbone.body.layer4[2].conv3.weight.register_hook(
-    #     lambda grad: hook_func(None, None, grad, 'resnet_layer4_conv3_weight_grad')
-    # )
-
-    # # Visualisierung der Masken-Segmentierungslogits
-    # model.roi_heads.mask_predictor.mask_fcn_logits.register_forward_hook(
-    #     lambda m, i, o: hook_func(m, i, o, 'mask_predictor_logits')
-    # )
-
-    # # Weight-Watch für Gradienten-Änderungen in den Convolution-Layern
-    # model.backbone.fpn.inner_blocks[3][0].weight.register_hook(
-    #     lambda grad: hook_func(None, None, grad, 'fpn_inner_block_P5_weight_grad')
-    # )
-
-    # # Verteilung der Masken-Beschriftungen auf den RoIs (RoI Heads Masken)
-    # model.roi_heads.mask_predictor.register_forward_hook(
-    #     lambda m, i, o: hook_func(m, i, o, 'roi_mask_predictor')
-    # )
-    ######################################################################################################
     # Hook for ResNet layer 1, first convolution
     model.backbone.body.layer1[0].conv1.register_forward_hook(
         lambda m, i, o: hook_func(m, i, o, 'resnet_layer1_conv1')
@@ -2230,15 +2030,6 @@ def register_maskrcnn_hooks(model):
     model.backbone.fpn.layer_blocks[3].register_forward_hook(
         lambda m, i, o: hook_func(m, i, o, 'fpn_output_layer4')
     )
-
-    # Hook for FPN extra layers (P6 and P7) if used in the model
-    # if hasattr(model.backbone.fpn, 'extra_blocks'):
-    #     model.backbone.fpn.extra_blocks[0].register_forward_hook(
-    #         lambda m, i, o: hook_func(m, i, o, 'fpn_extra_layer_p6')
-    #     )
-    #     model.backbone.fpn.extra_blocks[1].register_forward_hook(
-    #         lambda m, i, o: hook_func(m, i, o, 'fpn_extra_layer_p7')
-    #     )
 
     # Region Proposal Network (RPN) hooks
     # Hook for RPN head's convolutional layer for objectness score
@@ -2505,14 +2296,6 @@ def extract_and_visualize_mask(masks, image=None, ax=None, visualize=True, color
             else:
                 alpha = 0.0
 
-            # for cur_row_idx in range(h):
-            #     for cur_col_idx in range(w):
-            #         if color_image[cur_row_idx, cur_col_idx].sum() == 0:
-            #             color_image[cur_row_idx, cur_col_idx] = image[cur_row_idx, cur_col_idx]
-            #         else:
-            #             # use formular: α⋅image+(1−α)⋅color_image
-            #             color_image[cur_row_idx, cur_col_idx] = (alpha * image[cur_row_idx, cur_col_idx] + (1 - alpha) * color_image[cur_row_idx, cur_col_idx]).astype(np.uint8)
-
             #get all background pixels
             black_pixels = np.all(color_image == [0, 0, 0], axis=-1)
 
@@ -2524,9 +2307,6 @@ def extract_and_visualize_mask(masks, image=None, ax=None, visualize=True, color
                 alpha * image[~black_pixels] +
                 (1 - alpha) * color_image[~black_pixels]
             ).astype(np.uint8)
-
-            # print(color_image.dtype)
-            # print(image.dtype)
                 
 
         if ax is None:
@@ -2951,8 +2731,6 @@ def inference(
         save_evaluation=True,
         show_visualization=False,
         show_evaluation=False,
-        width=1920,
-        height=1080,
         mask_threshold=0.9,
         show_insights=False,
         save_insights=True,
@@ -2984,8 +2762,6 @@ def inference(
         save_visualization (bool): Whether to save the visualizations.
         save_evaluation (bool): Whether to save evaluation results.
         show_visualization (bool): Whether to display the visualized results.
-        width (int): Image width for resizing during inference.
-        height (int): Image height for resizing during inference.
 
     Returns:
     --------
@@ -3006,10 +2782,10 @@ def inference(
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     print(f"Using {device}")
 
-    dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=Inference_Augmentations(width=width, height=height), 
+    dataset = Dual_Dir_Dataset(img_dir=img_dir, depth_dir=depth_dir, mask_dir=mask_dir, transform=None, 
                                 amount=amount, start_idx=start_idx, end_idx=end_idx, image_name=image_name, 
                                 data_mode=data_mode, use_mask=use_mask, use_depth=use_depth, log_path=None,
-                                width=width, height=height, should_log=False, should_print=True, should_verify=verify_data)
+                                should_log=False, should_print=True, should_verify=verify_data)
     if use_mask:
         data_loader = DataLoader(dataset, batch_size=1, num_workers=num_workers, collate_fn=collate_fn)
     else:
@@ -3034,10 +2810,15 @@ def inference(
         visualization_dir = os.path.join(output_dir, "visualizations")
         os.makedirs(visualization_dir, exist_ok=True)
     
+    height, width = dataset.size()
 
     with torch.no_grad():
         # create model
-        model = load_maskrcnn(weights_path=weights_path, use_4_channels=use_depth, pretrained=False, log_path=None, should_log=False, should_print=False)
+        model = load_maskrcnn(
+                        weights_path=weights_path, use_4_channels=use_depth, 
+                        pretrained=False, log_path=None, should_log=False, should_print=False,
+                        min_size=height, max_size=width
+                    )
         model.eval()
         model = model.to(device)
 
@@ -3093,7 +2874,6 @@ def inference(
             # save mask
             os.makedirs(output_dir, exist_ok=True)
 
-            # result = {key: value.cpu() for key, value in result.items()}
             cleaned_name = model_name + "_" + ".".join(name.split(".")[:-1])
 
             extracted_mask = extract_and_visualize_mask(result_masks, image=None, ax=None, visualize=False, color_map=None, soft_join=False)
@@ -3111,41 +2891,13 @@ def inference(
             # plot results
             if should_visualize_mask or should_visualize_mask_and_image:
                 print("Visualize your model...")
-                # ncols = 3
-
-                # fig, ax = plt.subplots(ncols=ncols, nrows=1, figsize=(18, 5), sharey=True)
-                # fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=None)
-                
-                # # plot original image
-                # ax[0].imshow(image)
-                # ax[0].set_title("Original")
-                # ax[0].axis("off")
-
-                # # plot mask alone
-                # _, color_image, color_map = extract_and_visualize_mask(result_masks, image=None, ax=ax[1], visualize=True)
-                # ax[1].set_title("Prediction Mask")
-                # ax[1].axis("off")
-
-                # # plot result
-                # _, _, _ = extract_and_visualize_mask(result_masks, image=image, ax=ax[2], visualize=True, color_map=color_map)    # color_map)
-                # ax[2].set_title("Result")
-                # ax[2].axis("off")
 
                 # plot image and mask
                 if should_visualize_mask_and_image:
-                    # fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(15, 10), sharey=True)
-                    # fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=None)
-
-                    _, image_plot, color_map = extract_and_visualize_mask(result_masks, image=image, ax=None, visualize=True, color_map=None, soft_join=True)    # color_map)
-                    # ax.set_title("Predicted Mask with input image")
-                    # ax.axis("off")
-                    # ax.set_facecolor('none')
-
-                    # fig.patch.set_visible(False) 
+                    _, image_plot, color_map = extract_and_visualize_mask(result_masks, image=image, ax=None, visualize=True, color_map=None, soft_join=True)    
 
                     if save_visualization:
                         cv2.imwrite(os.path.join(visualization_dir, f"{cleaned_name}.jpg"), cv2.cvtColor(image_plot, cv2.COLOR_RGB2BGR))
-                        # plt.savefig(os.path.join(visualization_dir, f"{cleaned_name}.jpg"))
 
                     if show_visualization:
                         print("\nShowing Visualization*")
@@ -3155,32 +2907,15 @@ def inference(
 
                 # plot mask
                 if should_visualize_mask:
-                    # fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(15, 10), sharey=True)
-                    # fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=None)
-
                     _, image_plot, color_map = extract_and_visualize_mask(result_masks, image=None, ax=None, visualize=True, color_map=color_map)    # color_map)
-                    # ax.set_title("Predicted Mask")
-                    # ax.axis("off")
-                    # ax.set_facecolor('none')
-
-                    # fig.patch.set_visible(False) 
 
                     if save_visualization:
                         cv2.imwrite(os.path.join(visualization_dir, f"{cleaned_name}_mask.jpg"), cv2.cvtColor(image_plot, cv2.COLOR_RGB2BGR))
-                        # plt.savefig(os.path.join(visualization_dir, f"{cleaned_name}_mask.jpg"))
 
                     if show_visualization:
                         plt.show()
                     
                     plt.clf()
-                    
-                # # use other visualization
-                # vis_img = visualize_results(image=image, predictions=all_results, score_threshold=0.5)
-                # if save_visualization:
-                #     cv2.imwrite(os.path.join(visualization_dir, f"{cleaned_name}_V2.jpg"), vis_img)
-                    
-                # if show_visualization:
-                #     plt.imshow(vis_img)
 
             # eval and plot ground truth comparisson
             if use_mask:
@@ -3293,8 +3028,6 @@ if __name__ == "__main__":
                 using_experiment_tracking=USING_EXPERIMENT_TRACKING,
                 create_new_experiment=CREATE_NEW_EXPERIMENT,    
                 experiment_name=EXPERIMENT_NAME,
-                width=WIDTH,
-                height=HEIGHT,
                 apply_random_flip=APPLY_RANDOM_FLIP, 
                 apply_random_rotation=APPLY_RANDOM_ROTATION,
                 apply_random_crop=APPLY_RANDOM_CROP, 
@@ -3329,8 +3062,6 @@ if __name__ == "__main__":
                 save_evaluation=SAVE_EVALUATION,
                 show_visualization=SHOW_VISUALIZATION,
                 show_evaluation=SHOW_EVALUATION,
-                width=WIDTH,
-                height=HEIGHT,
                 mask_threshold=MASK_SCORE_THRESHOLD,
                 show_insights=SHOW_INSIGHTS,
                 save_insights=SAVE_INSIGHTS,
