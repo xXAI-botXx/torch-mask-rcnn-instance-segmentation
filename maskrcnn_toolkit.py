@@ -136,13 +136,13 @@ if MODE == RUN_MODE.TRAIN:
 # INFERENCE #
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
-    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_10_10_epoch_040.pth"  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_10_80_epoch_040.pth"  # Path to the model weights file
     MASK_SCORE_THRESHOLD = 0.5
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
 
     GROUND_PATH = "D:/3xM/3xM_Test_Dataset/3xM_Bias_Experiment"   # "/mnt/morespace/3xM"    "D:/3xM/3xM_Test_Dataset/3xM_Bias_Experiment"
-    DATASET_NAME = "known-known"    #  "known-known", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
+    DATASET_NAME = "unknown-unknown"    #  "known-known", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
     MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
@@ -2530,13 +2530,14 @@ def extract_and_visualize_mask(masks, image=None, ax=None, visualize=True, color
                 
 
         if ax is None:
-            fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(20, 15), sharey=True)
-            fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.2, hspace=None)
-            
-        ax.imshow(color_image, vmin=0, vmax=255)
-        ax.set_title("Instance Segmentation Mask")
-        ax.axis("off")
-        ax.set_facecolor('none')
+            plt.imshow(color_image)
+            # fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(20, 15), sharey=True)
+            # fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.2, hspace=None)
+        else:  
+            ax.imshow(color_image, vmin=0, vmax=255)
+            ax.set_title("Instance Segmentation Mask")
+            ax.axis("off")
+            ax.set_facecolor('none')
 
         return result_mask, color_image, color_map
 
@@ -3132,44 +3133,46 @@ def inference(
 
                 # plot image and mask
                 if should_visualize_mask_and_image:
-                    fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(15, 10), sharey=True)
-                    fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=None)
+                    # fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(15, 10), sharey=True)
+                    # fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=None)
 
-                    _, _, color_map = extract_and_visualize_mask(result_masks, image=image, ax=ax, visualize=True, color_map=None, soft_join=True)    # color_map)
-                    ax.set_title("Predicted Mask with input image")
-                    ax.axis("off")
-                    ax.set_facecolor('none')
+                    _, image_plot, color_map = extract_and_visualize_mask(result_masks, image=image, ax=None, visualize=True, color_map=None, soft_join=True)    # color_map)
+                    # ax.set_title("Predicted Mask with input image")
+                    # ax.axis("off")
+                    # ax.set_facecolor('none')
 
-                    fig.patch.set_visible(False) 
+                    # fig.patch.set_visible(False) 
 
                     if save_visualization:
-                        os.makedirs(visualization_dir, exist_ok=True)
-                        plt.savefig(os.path.join(visualization_dir, f"{cleaned_name}.jpg"), dpi=fig.dpi, transparent=True)
+                        cv2.imwrite(os.path.join(visualization_dir, f"{cleaned_name}.jpg"), cv2.cvtColor(image_plot, cv2.COLOR_RGB2BGR))
+                        # plt.savefig(os.path.join(visualization_dir, f"{cleaned_name}.jpg"))
 
                     if show_visualization:
                         print("\nShowing Visualization*")
                         plt.show()
-                        plt.clf()
+                    
+                    plt.clf()
 
                 # plot mask
                 if should_visualize_mask:
-                    fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(15, 10), sharey=True)
-                    fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=None)
+                    # fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(15, 10), sharey=True)
+                    # fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.02, hspace=None)
 
-                    _, _, color_map = extract_and_visualize_mask(result_masks, image=None, ax=ax, visualize=True, color_map=color_map)    # color_map)
-                    ax.set_title("Predicted Mask")
-                    ax.axis("off")
-                    ax.set_facecolor('none')
+                    _, image_plot, color_map = extract_and_visualize_mask(result_masks, image=None, ax=None, visualize=True, color_map=color_map)    # color_map)
+                    # ax.set_title("Predicted Mask")
+                    # ax.axis("off")
+                    # ax.set_facecolor('none')
 
-                    fig.patch.set_visible(False) 
+                    # fig.patch.set_visible(False) 
 
                     if save_visualization:
-                        os.makedirs(visualization_dir, exist_ok=True)
-                        plt.savefig(os.path.join(visualization_dir, f"{cleaned_name}_mask.jpg"), dpi=fig.dpi, transparent=True)
+                        cv2.imwrite(os.path.join(visualization_dir, f"{cleaned_name}_mask.jpg"), cv2.cvtColor(image_plot, cv2.COLOR_RGB2BGR))
+                        # plt.savefig(os.path.join(visualization_dir, f"{cleaned_name}_mask.jpg"))
 
                     if show_visualization:
                         plt.show()
-                        plt.clf()
+                    
+                    plt.clf()
                     
                 # # use other visualization
                 # vis_img = visualize_results(image=image, predictions=all_results, score_threshold=0.5)
