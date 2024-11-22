@@ -87,8 +87,8 @@ if MODE == RUN_MODE.TRAIN:
     USE_DEPTH = True           # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
 
-    GROUND_PATH = "D:/3xM"    # "/mnt/morespace/3xM" "D:/3xM" 
-    DATASET_NAME = "3xM_Dataset_10_160"
+    GROUND_PATH = "/mnt/morespace/3xM"    # "/mnt/morespace/3xM" "D:/3xM" 
+    DATASET_NAME = "3xM_Dataset_160_160"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
     MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
@@ -109,7 +109,7 @@ if MODE == RUN_MODE.TRAIN:
     CREATE_NEW_EXPERIMENT = True       # Whether to create a new experiment run
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
-    NUM_EPOCHS = 5                    # Number of training epochs
+    NUM_EPOCHS = 100                    # Number of training epochs
     WARM_UP_ITER = 2000
     LEARNING_RATE = 3e-3              # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
@@ -201,10 +201,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam, SGD
-from torch.optim.lr_scheduler import OneCycleLR, CyclicLR, LambdaLR
+from torch.optim.lr_scheduler import LambdaLR, SequentialLR, LinearLR, CosineAnnealingLR
 
 import torchvision
+from torchvision.ops import MultiScaleRoIAlign
 from torchvision.models.detection import MaskRCNN
+from torchvision.models.detection.mask_rcnn import MaskRCNNHeads, MaskRCNNPredictor
+from torchvision.models.detection.rpn import RegionProposalNetwork, RPNHead
+from torchvision.models.detection.roi_heads import RoIHeads
+from torchvision.models.detection.faster_rcnn import TwoMLPHead, FastRCNNPredictor
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.models.detection.anchor_utils import AnchorGenerator
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
@@ -227,7 +232,7 @@ from scipy.optimize import linear_sum_assignment
 
 
 
-class Extended_Backbone(nn.Module):
+class Extended_ResNet(nn.Module):
     def __init__(self):
         super().__init__()
         self.backbone = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
@@ -252,15 +257,17 @@ class Extended_Backbone(nn.Module):
         c4 = self.c4(c3)
         c5 = self.c5(c4)
         return c1, c2, c3, c4, c5
+    
+    def update_conv1(self, new_conv1):
+        self.conv1 = new_conv1  # Replace the old Conv1 Layer with the new one
+        self.c1 = nn.Sequential(new_conv1, self.backbone.bn1, self.backbone.relu)
+            
 
 
 
 class Extended_FPN(nn.Module):
-    def __init__(self, backbone):
+    def __init__(self):
         super().__init__()
-        self.body = backbone
-        self.fpn = self
-        self.out_channels = 256
 
         # Inner Blocks: 1x1 Convolutions for Channel-Resizing / Adjustment
         self.inner_blocks = nn.ModuleList([
@@ -280,9 +287,9 @@ class Extended_FPN(nn.Module):
             nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)   # Für P5
         ])
 
-    def forward(self, x):
+    def forward(self, c1, c2, c3, c4, c5):
         # Extract features from body
-        c1, c2, c3, c4, c5 = self.body(x)
+        # c1, c2, c3, c4, c5 = self.body(x)
 
         # build feature pyramid
         p5 = self.inner_blocks[4](c5)
@@ -299,6 +306,21 @@ class Extended_FPN(nn.Module):
         p1 = self.layer_blocks[0](p1)
 
         return [p1, p2, p3, p4, p5]
+
+
+
+class Extended_Backbone(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.body = Extended_ResNet()
+        self.fpn = Extended_FPN()
+        self.out_channels = 256
+        
+    def forward(self, x):
+        c1, c2, c3, c4, c5 = self.body(x)  # Deine ResNet-Features
+        fpn_features = self.fpn(c1, c2, c3, c4, c5)  # Deine FPN-Features
+        # Mask R-CNN erwartet ein Dictionary mit Feature-Maps
+        return {"p1": fpn_features[0], "p2": fpn_features[1], "p3": fpn_features[2], "p4": fpn_features[3], "p5": fpn_features[4]}
 
 
 
@@ -335,8 +357,7 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
     """
     if extended_version:
         backbone = Extended_Backbone()
-        fpn = Extended_FPN(backbone)
-        model = MaskRCNN(fpn, num_classes=2)  # 2 Classes (Background + 1 Object)
+        model = MaskRCNN(backbone, num_classes=2)  # 2 Classes (Background + 1 Object)
 
         if use_4_channels:
             # Change the first Conv2d-Layer for 4 Channels
@@ -354,21 +375,113 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
                 new_conv1.weight[:, :3, :, :] = model.backbone.body.conv1.weight  # Copy old 3 Channels
                 new_conv1.weight[:, 3:, :, :] = model.backbone.body.conv1.weight[:, :1, :, :]  # Init new 4.th Channel with the one old channel
 
-            
-            model.backbone.body.conv1 = new_conv1  # Replace the old Conv1 Layer with the new one
+            # update model
+            model.backbone.body.update_conv1(new_conv1)
             
             # Modify the transform to handle 4 channels
             model.transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
 
+
+        out_channels = model.backbone.out_channels
+        
+        # update RPN
         # modify anchors for smaller objects
-        model.rpn.anchor_generator = AnchorGenerator(
-            sizes = ((16, 32, 64, 128, 256),),
-            aspect_ratios = ((0.1, 0.5, 1.0, 2.0, 3.0),) * 5
-            # aspect_ratios = ((0.5, 1.0, 2.0, 3.0, 0.33),)
+        # model.rpn.anchor_generator = AnchorGenerator(
+        #     sizes = ((16, 32, 64, 128, 256),),
+        #     aspect_ratios = ((0.25, 0.5, 1.0, 2.0, 3.0),)
+        # )
+        rpn_anchor_generator = AnchorGenerator(
+            sizes=(
+                (16, 32, 64),        # Sizes for level 0
+                (32, 64, 128),       # Sizes for level 1
+                (64, 128, 256),     # Sizes for level 2
+                (128, 256, 512),   # Sizes for level 3
+                (256, 512, 1024),  # Sizes for level 4
+            ),
+            aspect_ratios=(
+                (0.25, 0.5, 1.0),  # Aspect ratios for level 0
+                (0.25, 0.5, 1.0),  # Aspect ratios for level 1
+                (0.25, 0.5, 1.0),  # Aspect ratios for level 2
+                (0.25, 0.5, 1.0),  # Aspect ratios for level 3
+                (0.25, 0.5, 1.0),  # Aspect ratios for level 4
+            ),
         )
-        # anchor_sizes = ((16,), (32,), (64,), (128,), (256,))  # Füge kleinere Größe für P1 hinzu
-        # aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
+        
+        # anchor_sizes = ((32,), (64,), (128,), (256,), (512,))
+        # aspect_ratios = ((0.125, 0.25, 0.5, 1.0, 2.0),) * len(anchor_sizes)
+        # rpn_anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
+        rpn_head = RPNHead(out_channels, rpn_anchor_generator.num_anchors_per_location()[0])
+        rpn_fg_iou_thresh = 0.7
+        rpn_bg_iou_thresh = 0.3
+        rpn_batch_size_per_image = 256
+        rpn_positive_fraction = 0.5
+        rpn_pre_nms_top_n = dict(training=2000, testing=1000)
+        rpn_post_nms_top_n = dict(training=2000, testing=1000)
+        rpn_nms_thresh = 0.7
+        score_thresh = 0.0
+        rpn = RegionProposalNetwork(
+            rpn_anchor_generator,
+            rpn_head,
+            rpn_fg_iou_thresh,
+            rpn_bg_iou_thresh,
+            rpn_batch_size_per_image,
+            rpn_positive_fraction,
+            rpn_pre_nms_top_n,
+            rpn_post_nms_top_n,
+            rpn_nms_thresh,
+            score_thresh=score_thresh,
+        )
+        model.rpn = rpn
+        
+        # Update RoI, Box and Mask Head
+        box_roi_pool = MultiScaleRoIAlign(featmap_names=["p1", "p2", "p3", "p4", "p5"], output_size=7, sampling_ratio=2)
+
+        resolution = box_roi_pool.output_size[0]
+        representation_size = 1024
+        box_head = TwoMLPHead(out_channels * resolution**2, representation_size)
+
+        representation_size = 1024
+        box_predictor = FastRCNNPredictor(representation_size, 2)
+        
+        box_fg_iou_thresh = 0.5
+        box_bg_iou_thresh = 0.5
+        box_batch_size_per_image = 512
+        box_positive_fraction = 0.25
+        bbox_reg_weights = None
+        box_score_thresh = 0.05
+        box_nms_thresh = 0.5
+        box_detections_per_img = 100
+
+        mask_roi_pool = MultiScaleRoIAlign(featmap_names=["p1", "p2", "p3", "p4", "p5"], output_size=14, sampling_ratio=2)
+        mask_layers = (256, 256, 256, 256, 256)
+        mask_dilation = 1
+        mask_head = MaskRCNNHeads(out_channels, mask_layers, mask_dilation)
+        
+        mask_predictor_in_channels = 256  # == mask_layers[-1]
+        mask_dim_reduced = 256
+        mask_predictor = MaskRCNNPredictor(mask_predictor_in_channels, mask_dim_reduced, 2)
+
+        roi_heads = RoIHeads(
+            # Box
+            box_roi_pool,
+            box_head,
+            box_predictor,
+            box_fg_iou_thresh,
+            box_bg_iou_thresh,
+            box_batch_size_per_image,
+            box_positive_fraction,
+            bbox_reg_weights,
+            box_score_thresh,
+            box_nms_thresh,
+            box_detections_per_img
+        )
+        roi_heads.mask_roi_pool = mask_roi_pool
+        roi_heads.mask_head = mask_head
+        roi_heads.mask_predictor = mask_predictor
+        
+        model.roi_heads = roi_heads
             
+        # other parameter adjustments
         # adjust loss weights
         model.rpn.rpn_cls_loss_weight = 1.0
         model.rpn.rpn_bbox_loss_weight = 2.0
@@ -377,14 +490,10 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
         model.roi_heads.classification_loss_weight = 1.0
         
         # adjust non-maximum suppression
-        model.roi_heads.nms_thresh = 0.25
-        model.roi_heads.box_predictor.nms_thresh = 0.25  # Higher NMS threshold for fewer boxes
-        model.roi_heads.mask_predictor.mask_nms_thresh = 0.3  # Higher threshold for fewer overlapping masks
+        model.roi_heads.nms_thresh = 0.2
+        model.roi_heads.box_predictor.nms_thresh = 0.2  # Higher NMS threshold for fewer boxes
+        model.roi_heads.mask_predictor.mask_nms_thresh = 0.2  # Higher threshold for fewer overlapping masks
         model.roi_heads.score_thresh = 0.4  # Increase the threshold for lower-confidence masks
-
-        # adjust image size
-        model.transform.min_size = min_size
-        model.transform.max_size = max_size
     else:
         backbone = resnet_fpn_backbone(backbone_name='resnet50', weights=ResNet50_Weights.IMAGENET1K_V2) # ResNet50_Weights.IMAGENET1K_V1)
         model = MaskRCNN(backbone, num_classes=2)  # 2 Classes (Background + 1 Object)
@@ -466,7 +575,7 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
     model_str += f"\n{'-'*64}\n"
     
         
-    # log(log_path, model_str, should_log=should_log, should_print=should_print)
+    log(log_path, model_str, should_log=should_log, should_print=False)
     
     return model
 
@@ -1555,7 +1664,14 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
     # Create Mask-RCNN with Feature Pyramid Network (FPN) as backbone
     if should_log:
         log(log_path, "Create the model and preparing for training...")
+    
+    # get data infos
     height, width = dataset.size()
+    data_size = len(dataset)
+    iteration = 0
+    max_iterations = int( (data_size/batch_size)*num_epochs )
+    warm_up_iterations = int( (data_size/batch_size)*1 )
+    
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     model = load_maskrcnn(
                 weights_path=weights_path, use_4_channels=use_depth, pretrained=False, 
@@ -1567,15 +1683,25 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
     # Optimizer
     optimizer = SGD(model.parameters(), lr=learning_rate, momentum=momentum, nesterov=True)  #, weight_decay=decay)
     
-    def warm_up_and_cool_down_lr(steps):
-        # warm up phase -> increase learn rate
-        if steps < warm_up_iter:
-            return steps / warm_up_iter
-        else:
-            # cool down phase -> reduce learn rate
-            return 0.1 ** ((steps - warm_up_iter) // (num_epochs*(data_size//batch_size) - warm_up_iter))
+    if extended_version:
+        # Define warm-up scheduler
+        warmup_scheduler = LinearLR(optimizer, start_factor=0.1, total_iters=warm_up_iterations)
 
-    scheduler = LambdaLR(optimizer, lr_lambda=warm_up_and_cool_down_lr)
+        # Define slow decrease scheduler (CosineAnnealingLR for smooth decays)
+        main_scheduler = CosineAnnealingLR(optimizer, T_max=max_iterations, eta_min=1e-5)
+
+        # Combine the schedulers
+        scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[warm_up_iterations])
+    else:
+        def warm_up_and_cool_down_lr(steps):
+            # warm up phase -> increase learn rate
+            if steps < warm_up_iter:
+                return steps / warm_up_iter
+            else:
+                # cool down phase -> reduce learn rate
+                return 0.1 ** ((steps - warm_up_iter) // (num_epochs*(data_size//batch_size) - warm_up_iter))
+
+        scheduler = LambdaLR(optimizer, lr_lambda=warm_up_and_cool_down_lr)
 
     # Experiment Tracking
     if experiment_tracking:
@@ -1586,9 +1712,6 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
         writer = SummaryWriter()
 
     # Init
-    data_size = len(dataset)
-    iteration = 0
-    max_iterations = int( (data_size/batch_size)*num_epochs )
     last_time = time.time()
     times = []
     loss_avgs = dict()
@@ -1665,13 +1788,15 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
                             parameter_name = "Unknown"
                         learnrate_str += f"\n    - {parameter_name}: {param_group['lr']:.0e}"
                     
-                    mlflow.log_metric(f"learnrate_{parameter_name}", param_group['lr'], step=iteration)
-                    writer.add_scalar(f"learnrate_{parameter_name}", param_group['lr'], iteration)
+                    if experiment_tracking:
+                        mlflow.log_metric(f"learnrate_{parameter_name}", param_group['lr'], step=iteration)
+                        writer.add_scalar(f"learnrate_{parameter_name}", param_group['lr'], iteration)
                 else:
                     current_learnrate = optimizer.param_groups[0]['lr']
                     learnrate_str += f" {current_learnrate:.0e}"
-                    mlflow.log_metric(f"learnrate", current_learnrate, step=iteration)
-                    writer.add_scalar(f"learnrate", current_learnrate, iteration)
+                    if experiment_tracking:
+                        mlflow.log_metric(f"learnrate", current_learnrate, step=iteration)
+                        writer.add_scalar(f"learnrate", current_learnrate, iteration)
                     
                 # log loss avg
                 for key, value in loss_dict.items():
@@ -1743,14 +1868,14 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
         if should_log:
             log(log_path, "\nStopping early. Saving network...")
         if should_save:
-            torch.save(model.state_dict(), f'./weights/{name}.pth')
+            torch.save(model.state_dict(), f'./weights/{name}_interrupt_{epoch}.pth')
 
         if experiment_tracking:
             try:
                 writer.close()
             except Exception:
                 pass
-            return
+        return
 
     if experiment_tracking:
         try:
@@ -2009,7 +2134,7 @@ def train(
         train_loop(log_path=log_path, learning_rate=learning_rate, momentum=momentum, # decay=decay, 
                         warm_up_iter=warm_up_iter,
                         num_epochs=num_epochs, batch_size=batch_size, dataset=dataset, data_loader=data_loader, 
-                        name=name, experiment_tracking=using_experiment_tracking, use_depth=use_depth,
+                        name=name, experiment_tracking=False, use_depth=use_depth,
                         weights_path=weights_path, should_log=True, should_save=True,
                         return_objective="None", extended_version=extended_version)
 
