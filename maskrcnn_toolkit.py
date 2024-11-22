@@ -74,7 +74,7 @@ class RUN_MODE(Enum):
 #############
 # Change these variables to your need
 
-MODE = RUN_MODE.INFERENCE
+MODE = RUN_MODE.TRAIN
 
 
 
@@ -82,11 +82,12 @@ MODE = RUN_MODE.INFERENCE
 # TRAINING #
 # -------- #
 if MODE == RUN_MODE.TRAIN:
+    EXTENDED_VERSION = True
     WEIGHTS_PATH = None         # Path to the model weights file
-    USE_DEPTH = False           # Whether to include depth information -> as rgb and depth on green channel
+    USE_DEPTH = True           # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = False         # True is recommended
 
-    GROUND_PATH = "/mnt/morespace/3xM"    # "/mnt/morespace/3xM" "D:/3xM" 
+    GROUND_PATH = "D:/3xM"    # "/mnt/morespace/3xM" "D:/3xM" 
     DATASET_NAME = "3xM_Dataset_10_160"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
@@ -102,9 +103,9 @@ if MODE == RUN_MODE.TRAIN:
 
     MULTIPLE_DATASETS = None # GROUND_PATH         # Path to folder for training multiple models
     SKIP_DATASETS = ["3xM_Test_Datasets", "3xM_Dataset_10_160"]
-    NAME = 'mask_rcnn_rgb'                 # Name of the model to use
+    NAME = 'extended_mask_rcnn_rgbd'                 # Name of the model to use
 
-    USING_EXPERIMENT_TRACKING = True   # Enable experiment tracking
+    USING_EXPERIMENT_TRACKING = False   # Enable experiment tracking
     CREATE_NEW_EXPERIMENT = True       # Whether to create a new experiment run
     EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
@@ -112,7 +113,7 @@ if MODE == RUN_MODE.TRAIN:
     WARM_UP_ITER = 2000
     LEARNING_RATE = 3e-3              # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
-    BATCH_SIZE = 5                    # Batch size for training
+    BATCH_SIZE = 1                    # Batch size for training
     SHUFFLE = True                     # Shuffle the data during training
     
     # Decide which Data Augmentation should be applied
@@ -131,18 +132,19 @@ if MODE == RUN_MODE.TRAIN:
 # INFERENCE #
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
-    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_10_80_epoch_040.pth"  # Path to the model weights file
+    EXTENDED_VERSION = False
+    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_80_160_epoch_040.pth"  # Path to the model weights file
     MASK_SCORE_THRESHOLD = 0.5
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
-    VERIFY_DATA = False         # True is recommended
+    VERIFY_DATA = True         # True is recommended
 
     GROUND_PATH = "D:/3xM/3xM_Test_Dataset/"   # "/mnt/morespace/3xM"    "D:/3xM/3xM_Test_Dataset/3xM_Bias_Experiment"
-    DATASET_NAME = "OCID-dataset-prep"    #  "known-known", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
+    DATASET_NAME = "OCID-dataset-prep"    #  "3xM_Bias_Experiment", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
     MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
 
-    DATA_MODE = DATA_LOADING_MODE.RANGE  # Mode for loading data -> All, Random, Range, Single Image
+    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
     AMOUNT = 10                       # Number of images for random mode
     START_IDX = 0                      # Starting index for range mode
     END_IDX = 10                       # Ending index for range mode
@@ -151,14 +153,14 @@ if MODE == RUN_MODE.INFERENCE:
     NUM_WORKERS = 4                    # Number of workers for data loading
 
     OUTPUT_DIR = "./output"            # Directory to save output files
-    USE_MASK = False                    # Whether to use masks during inference
+    USE_MASK = True                    # Whether to use masks during inference
     SHOULD_SAVE_MASK = False
     OUTPUT_TYPE = "png"                # Output format: 'numpy-array' or 'png'
-    SHOULD_VISUALIZE_MASK = True,
-    SHOULD_VISUALIZE_MASK_AND_IMAGE = True,
-    SAVE_VISUALIZATION = True          # Save the visualizations to disk
+    SHOULD_VISUALIZE_MASK = False,
+    SHOULD_VISUALIZE_MASK_AND_IMAGE = False,
+    SAVE_VISUALIZATION = False          # Save the visualizations to disk
     SHOW_VISUALIZATION = False          # Display the visualizations
-    SAVE_EVALUATION = False             # Save the evaluation results
+    SAVE_EVALUATION = True             # Save the evaluation results
     SHOW_EVALUATION = False             # Display the evaluation results
     SHOW_INSIGHTS = False
     SAVE_INSIGHTS = False
@@ -195,6 +197,8 @@ from PIL import Image    # for PyTorch Transformations
 
 # deep learning
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam, SGD
 from torch.optim.lr_scheduler import OneCycleLR, CyclicLR, LambdaLR
@@ -202,8 +206,10 @@ from torch.optim.lr_scheduler import OneCycleLR, CyclicLR, LambdaLR
 import torchvision
 from torchvision.models.detection import MaskRCNN
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
+from torchvision.models.detection.anchor_utils import AnchorGenerator
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from torchvision.models import ResNet50_Weights
+from torchvision.models.resnet import resnet50
 import torchvision.transforms as T
 
 # experiment tracking
@@ -219,9 +225,87 @@ from scipy.optimize import linear_sum_assignment
 # general #
 ###########
 
+
+
+class Extended_Backbone(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.backbone = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+        # add first layers
+        self.c1 = nn.Sequential(self.backbone.conv1, self.backbone.bn1, self.backbone.relu)  # C1
+        self.c2 = nn.Sequential(self.backbone.maxpool, self.backbone.layer1)  # C2
+        self.c3 = self.backbone.layer2  # C3
+        self.c4 = self.backbone.layer3  # C4
+        self.c5 = self.backbone.layer4  # C5
+
+        # just for Mask R-CNN
+        self.conv1 = self.backbone.conv1
+        self.bn1 = self.backbone.bn1
+        self.layer2 = self.backbone.layer2
+        self.layer3 = self.backbone.layer3
+        self.layer4 = self.backbone.layer4
+
+    def forward(self, x):
+        c1 = self.c1(x)
+        c2 = self.c2(c1)
+        c3 = self.c3(c2)
+        c4 = self.c4(c3)
+        c5 = self.c5(c4)
+        return c1, c2, c3, c4, c5
+
+
+
+class Extended_FPN(nn.Module):
+    def __init__(self, backbone):
+        super().__init__()
+        self.body = backbone
+        self.fpn = self
+        self.out_channels = 256
+
+        # Inner Blocks: 1x1 Convolutions for Channel-Resizing / Adjustment
+        self.inner_blocks = nn.ModuleList([
+            nn.Conv2d(64, 256, kernel_size=1),   # Für C1 (64 Channels)
+            nn.Conv2d(256, 256, kernel_size=1),  # Für C2
+            nn.Conv2d(512, 256, kernel_size=1),  # Für C3
+            nn.Conv2d(1024, 256, kernel_size=1), # Für C4
+            nn.Conv2d(2048, 256, kernel_size=1)  # Für C5
+        ])
+
+        # Layer Blocks: 3x3 Convolutions for more refined results
+        self.layer_blocks = nn.ModuleList([
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),  # Für P1
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),  # Für P2
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),  # Für P3
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),  # Für P4
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)   # Für P5
+        ])
+
+    def forward(self, x):
+        # Extract features from body
+        c1, c2, c3, c4, c5 = self.body(x)
+
+        # build feature pyramid
+        p5 = self.inner_blocks[4](c5)
+        p4 = self.inner_blocks[3](c4) + F.interpolate(p5, scale_factor=2, mode="nearest")
+        p3 = self.inner_blocks[2](c3) + F.interpolate(p4, scale_factor=2, mode="nearest")
+        p2 = self.inner_blocks[1](c2) + F.interpolate(p3, scale_factor=2, mode="nearest")
+        p1 = self.inner_blocks[0](c1) + F.interpolate(p2, scale_factor=2, mode="nearest")
+
+        # Apply layer blocks
+        p5 = self.layer_blocks[4](p5)
+        p4 = self.layer_blocks[3](p4)
+        p3 = self.layer_blocks[2](p3)
+        p2 = self.layer_blocks[1](p2)
+        p1 = self.layer_blocks[0](p1)
+
+        return [p1, p2, p3, p4, p5]
+
+
+
 def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
                   image_mean=[0.485, 0.456, 0.406, 0.5], image_std=[0.229, 0.224, 0.225, 0.5],    # from ImageNet
-                  min_size=1080, max_size=1920, log_path=None, should_log=False, should_print=True):
+                  min_size=1080, max_size=1920, log_path=None, should_log=False, should_print=True,
+                  extended_version=False):
     """
     Load a Mask R-CNN model with a specified backbone and optional modifications.
 
@@ -249,43 +333,96 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
         model (MaskRCNN): 
             The initialized Mask R-CNN model instance, ready for training or inference.
     """
-    backbone = resnet_fpn_backbone(backbone_name='resnet50', weights=ResNet50_Weights.IMAGENET1K_V2) # ResNet50_Weights.IMAGENET1K_V1)
-    model = MaskRCNN(backbone, num_classes=2)  # 2 Classes (Background + 1 Object)
+    if extended_version:
+        backbone = Extended_Backbone()
+        fpn = Extended_FPN(backbone)
+        model = MaskRCNN(fpn, num_classes=2)  # 2 Classes (Background + 1 Object)
 
-    if use_4_channels:
-        # Change the first Conv2d-Layer for 4 Channels
-        in_features = model.backbone.body.conv1.in_channels    # this have to be changed
-        out_features = model.backbone.body.conv1.out_channels
-        kernel_size = model.backbone.body.conv1.kernel_size
-        stride = model.backbone.body.conv1.stride
-        padding = model.backbone.body.conv1.padding
-        
-        # Create new conv layer with 4 channels
-        new_conv1 = torch.nn.Conv2d(4, out_features, kernel_size=kernel_size, stride=stride, padding=padding)
-        
-        # copy the existing weights from the first 3 Channels
-        with torch.no_grad():
-            new_conv1.weight[:, :3, :, :] = model.backbone.body.conv1.weight  # Copy old 3 Channels
-            new_conv1.weight[:, 3:, :, :] = model.backbone.body.conv1.weight[:, :1, :, :]  # Init new 4.th Channel with the one old channel
+        if use_4_channels:
+            # Change the first Conv2d-Layer for 4 Channels
+            in_features = model.backbone.body.conv1.in_channels    # this have to be changed
+            out_features = model.backbone.body.conv1.out_channels
+            kernel_size = model.backbone.body.conv1.kernel_size
+            stride = model.backbone.body.conv1.stride
+            padding = model.backbone.body.conv1.padding
+            
+            # Create new conv layer with 4 channels
+            new_conv1 = torch.nn.Conv2d(4, out_features, kernel_size=kernel_size, stride=stride, padding=padding)
+            
+            # copy the existing weights from the first 3 Channels
+            with torch.no_grad():
+                new_conv1.weight[:, :3, :, :] = model.backbone.body.conv1.weight  # Copy old 3 Channels
+                new_conv1.weight[:, 3:, :, :] = model.backbone.body.conv1.weight[:, :1, :, :]  # Init new 4.th Channel with the one old channel
 
+            
+            model.backbone.body.conv1 = new_conv1  # Replace the old Conv1 Layer with the new one
+            
+            # Modify the transform to handle 4 channels
+            model.transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
+
+        # modify anchors for smaller objects
+        model.rpn.anchor_generator = AnchorGenerator(
+            sizes = ((16, 32, 64, 128, 256),),
+            aspect_ratios = ((0.1, 0.5, 1.0, 2.0, 3.0),) * 5
+            # aspect_ratios = ((0.5, 1.0, 2.0, 3.0, 0.33),)
+        )
+        # anchor_sizes = ((16,), (32,), (64,), (128,), (256,))  # Füge kleinere Größe für P1 hinzu
+        # aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
+            
+        # adjust loss weights
+        model.rpn.rpn_cls_loss_weight = 1.0
+        model.rpn.rpn_bbox_loss_weight = 2.0
+        model.roi_heads.mask_loss_weight = 2.0
+        model.roi_heads.box_loss_weight = 1.0
+        model.roi_heads.classification_loss_weight = 1.0
         
-        model.backbone.body.conv1 = new_conv1  # Replace the old Conv1 Layer with the new one
+        # adjust non-maximum suppression
+        model.roi_heads.nms_thresh = 0.25
+        model.roi_heads.box_predictor.nms_thresh = 0.25  # Higher NMS threshold for fewer boxes
+        model.roi_heads.mask_predictor.mask_nms_thresh = 0.3  # Higher threshold for fewer overlapping masks
+        model.roi_heads.score_thresh = 0.4  # Increase the threshold for lower-confidence masks
+
+        # adjust image size
+        model.transform.min_size = min_size
+        model.transform.max_size = max_size
+    else:
+        backbone = resnet_fpn_backbone(backbone_name='resnet50', weights=ResNet50_Weights.IMAGENET1K_V2) # ResNet50_Weights.IMAGENET1K_V1)
+        model = MaskRCNN(backbone, num_classes=2)  # 2 Classes (Background + 1 Object)
+
+        if use_4_channels:
+            # Change the first Conv2d-Layer for 4 Channels
+            in_features = model.backbone.body.conv1.in_channels    # this have to be changed
+            out_features = model.backbone.body.conv1.out_channels
+            kernel_size = model.backbone.body.conv1.kernel_size
+            stride = model.backbone.body.conv1.stride
+            padding = model.backbone.body.conv1.padding
+            
+            # Create new conv layer with 4 channels
+            new_conv1 = torch.nn.Conv2d(4, out_features, kernel_size=kernel_size, stride=stride, padding=padding)
+            
+            # copy the existing weights from the first 3 Channels
+            with torch.no_grad():
+                new_conv1.weight[:, :3, :, :] = model.backbone.body.conv1.weight  # Copy old 3 Channels
+                new_conv1.weight[:, 3:, :, :] = model.backbone.body.conv1.weight[:, :1, :, :]  # Init new 4.th Channel with the one old channel
+
+            
+            model.backbone.body.conv1 = new_conv1  # Replace the old Conv1 Layer with the new one
+            
+            # Modify the transform to handle 4 channels
+            model.transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
+            
+        # adjust loss weights
+        model.rpn.rpn_cls_loss_weight = 1.0
+        model.rpn.rpn_bbox_loss_weight = 2.0
+        model.roi_heads.mask_loss_weight = 2.0
+        model.roi_heads.box_loss_weight = 1.0
+        model.roi_heads.classification_loss_weight = 1.0
         
-        # Modify the transform to handle 4 channels
-        model.transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
-        
-    # adjust loss weights
-    model.rpn.rpn_cls_loss_weight = 1.0
-    model.rpn.rpn_bbox_loss_weight = 2.0
-    model.roi_heads.mask_loss_weight = 2.0
-    model.roi_heads.box_loss_weight = 1.0
-    model.roi_heads.classification_loss_weight = 1.0
-    
-    # adjust non-maximum suppression
-    model.roi_heads.nms_thresh = 0.4
-    model.roi_heads.box_predictor.nms_thresh = 0.4  # Higher NMS threshold for fewer boxes
-    model.roi_heads.mask_predictor.mask_nms_thresh = 0.4  # Higher threshold for fewer overlapping masks
-    model.roi_heads.score_thresh = 0.4  # Increase the threshold for lower-confidence masks
+        # adjust non-maximum suppression
+        model.roi_heads.nms_thresh = 0.4
+        model.roi_heads.box_predictor.nms_thresh = 0.4  # Higher NMS threshold for fewer boxes
+        model.roi_heads.mask_predictor.mask_nms_thresh = 0.4  # Higher threshold for fewer overlapping masks
+        model.roi_heads.score_thresh = 0.5  # Increase the threshold for lower-confidence masks
 
         
     # load weights
@@ -329,7 +466,7 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
     model_str += f"\n{'-'*64}\n"
     
         
-    log(log_path, model_str, should_log=should_log, should_print=should_print)
+    # log(log_path, model_str, should_log=should_log, should_print=should_print)
     
     return model
 
@@ -1388,7 +1525,7 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
                dataset, data_loader, name, experiment_tracking,
                 use_depth, weights_path, should_log=True, should_save=True,
                 return_objective='model', mask_score_threshold=0.9,
-                calc_metrics=False):
+                calc_metrics=False, extended_version=False):
     """
     Train the Mask R-CNN model with the specified parameters.
 
@@ -1423,7 +1560,7 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
     model = load_maskrcnn(
                 weights_path=weights_path, use_4_channels=use_depth, pretrained=False, 
                 log_path=log_path, should_log=should_log, should_print=should_log,
-                min_size=height, max_size=width
+                min_size=height, max_size=width, extended_version=extended_version
             )
     model = model.to(device)
 
@@ -1658,6 +1795,7 @@ def train_loop(log_path, learning_rate, momentum, num_epochs, warm_up_iter, batc
 
 def train(
         name='mask_rcnn',
+        extended_version=False,
         weights_path=None,
         num_epochs=20,
         learning_rate=0.005,
@@ -1862,18 +2000,18 @@ def train(
                             num_epochs=num_epochs, batch_size=batch_size, dataset=dataset, data_loader=data_loader, 
                             name=name, experiment_tracking=using_experiment_tracking, use_depth=use_depth,
                             weights_path=weights_path, should_log=True, should_save=True,
-                            return_objective="None")
+                            return_objective="None", extended_version=extended_version)
 
                 # close experiment tracking
                 if is_mlflow_active():
                     mlflow.end_run()
-        else:
-            train_loop(log_path=log_path, learning_rate=learning_rate, momentum=momentum, # decay=decay, 
-                            warm_up_iter=warm_up_iter,
-                            num_epochs=num_epochs, batch_size=batch_size, dataset=dataset, data_loader=data_loader, 
-                            name=name, experiment_tracking=using_experiment_tracking, use_depth=use_depth,
-                            weights_path=weights_path, should_log=True, should_save=True,
-                            return_objective="None")
+    else:
+        train_loop(log_path=log_path, learning_rate=learning_rate, momentum=momentum, # decay=decay, 
+                        warm_up_iter=warm_up_iter,
+                        num_epochs=num_epochs, batch_size=batch_size, dataset=dataset, data_loader=data_loader, 
+                        name=name, experiment_tracking=using_experiment_tracking, use_depth=use_depth,
+                        weights_path=weights_path, should_log=True, should_save=True,
+                        return_objective="None", extended_version=extended_version)
 
 
 
@@ -2711,6 +2849,7 @@ def save_and_show_evaluation_summary(sum_dict, name="instance_segmentation", sho
 
 def inference(  
         weights_path,
+        extended_version=False,
         img_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/rgb',
         depth_dir='/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/depth-prep',
         mask_dir = '/home/local-admin/data/3xM/3xM_Dataset_1_1_TEST/mask-prep',
@@ -2817,7 +2956,7 @@ def inference(
         model = load_maskrcnn(
                         weights_path=weights_path, use_4_channels=use_depth, 
                         pretrained=False, log_path=None, should_log=False, should_print=False,
-                        min_size=height, max_size=width
+                        min_size=height, max_size=width, extended_version=extended_version
                     )
         model.eval()
         model = model.to(device)
@@ -3008,6 +3147,7 @@ if __name__ == "__main__":
             train(
                 name=name,
                 weights_path=WEIGHTS_PATH,
+                extended_version=EXTENDED_VERSION,
                 num_epochs=NUM_EPOCHS,
                 warm_up_iter=WARM_UP_ITER,
                 learning_rate=LEARNING_RATE,
@@ -3042,6 +3182,7 @@ if __name__ == "__main__":
     elif MODE == RUN_MODE.INFERENCE:
         inference(
                 weights_path=WEIGHTS_PATH,
+                extended_version=EXTENDED_VERSION,
                 img_dir=IMG_DIR,
                 depth_dir=DEPTH_DIR,
                 mask_dir = MASK_DIR,
