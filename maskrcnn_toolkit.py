@@ -74,7 +74,7 @@ class RUN_MODE(Enum):
 #############
 # Change these variables to your need
 
-MODE = RUN_MODE.TRAIN
+MODE = RUN_MODE.INFERENCE
 
 
 
@@ -113,7 +113,7 @@ if MODE == RUN_MODE.TRAIN:
     WARM_UP_ITER = 2000
     LEARNING_RATE = 3e-3              # Learning rate for the optimizer
     MOMENTUM = 0.9                     # Momentum for the optimizer
-    BATCH_SIZE = 1                    # Batch size for training
+    BATCH_SIZE = 5                    # Batch size for training
     SHUFFLE = True                     # Shuffle the data during training
     
     # Decide which Data Augmentation should be applied
@@ -133,7 +133,7 @@ if MODE == RUN_MODE.TRAIN:
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
     EXTENDED_VERSION = False
-    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_80_160_epoch_040.pth"  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_160_160_epoch_040.pth"  # Path to the model weights file
     MASK_SCORE_THRESHOLD = 0.5
     USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = True         # True is recommended
@@ -676,11 +676,11 @@ class Dual_Dir_Dataset(Dataset):
         if should_verify:
             self.verify_data()
 
+        self.extract_width_height()
+
         # update augmentations -> needed for background augmentation
         if self.transform:
-            self.transform.update(bg_value=self.background_value)
-
-        self.extract_width_height()
+            self.transform.update(bg_value=self.background_value, width=self.width, height=self.height)
 
 
 
@@ -1451,12 +1451,14 @@ class Train_Augmentations:
         self.augmentations = T.Compose(transformations)
         self.apply_random_background_modification = apply_random_background_modification
 
-    def update(self, bg_value=None):
+    def update(self, bg_value=None, width=1920, height=1080):
         if self.apply_random_background_modification and bg_value is None:
             raise ValueError("If choosing apply_random_background_modification = True,you have to pass a background value to the augmentation update.")
 
         if self.apply_random_background_modification:
             self.transformations += [Random_Background_Modification(bg_value=bg_value)]
+        
+        self.transformations += [Resize(width=width, height=height)]
     
         self.augmentations = T.Compose(self.transformations)
 
@@ -3277,7 +3279,6 @@ if __name__ == "__main__":
                 warm_up_iter=WARM_UP_ITER,
                 learning_rate=LEARNING_RATE,
                 momentum=MOMENTUM,
-                # decay=DECAY,
                 batch_size=BATCH_SIZE,
                 img_dir=img_path,
                 mask_dir=mask_path,
@@ -3301,7 +3302,6 @@ if __name__ == "__main__":
                 apply_random_gaussian_blur=APPLY_RANDOM_GAUSSIAN_BLUR,
                 apply_random_scale=APPLY_RANDOM_SCALE,
                 apply_random_background_modification=APPLY_RANDOM_BACKGROUND_MODIFICATION,
-                # mask_score_threshold=MASK_SCORE_THRESHOLD,
                 verify_data=VERIFY_DATA
             )
     elif MODE == RUN_MODE.INFERENCE:
