@@ -14,15 +14,29 @@ Using Mask-RCNN from Pytorch for instance segmentation with ease.
 ### Installation
 
 1. Install Anaconda
-2. Install an environment for instance segmentation:<br>
-    ```terminal
-    conda env create -f conda_env.yml
-    ```
-3. [Download this project](https://github.com/xXAI-botXx/torch-mask-rcnn-instance-segmentation)<br>
+2. [Clone or Download this project](https://github.com/xXAI-botXx/torch-mask-rcnn-instance-segmentation)<br>
     ```terminal
     git clone https://github.com/xXAI-botXx/torch-mask-rcnn-instance-segmentation.git
     ```
+3. Install an environment for instance segmentation:<br>
+    ```terminal
+    cd /to/git/project
+    conda env create -f conda_env.yml
+    ```
 
+For Windows there are 2 other yml files, you can try if one of them works for you.
+
+In worse case you also can setup your own conda env:
+```terminal
+conda env create python=3.10 -n maskrcnn -y
+conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia -y
+conda install pillow -y
+conda install opencv -c conda-forge -y
+conda install matplotlib -y
+conda install scipy -y
+conda install mlflow -y
+conda install tensorboard -y
+```
 
 
 ---
@@ -81,87 +95,50 @@ Then scroll a bit down to
 Now you can set your own settings. Following settings are available:
 
 ```python
-WEIGHTS_PATH = None                             # Path to the model weights file
-USE_DEPTH = False                               # Whether to include depth information -> as rgb and depth on green channel
+EXTENDED_VERSION = True
+    WEIGHTS_PATH = None         # Path to the model weights file
+    USE_DEPTH = True            # Whether to include depth information -> as rgb and depth on green channel
+    VERIFY_DATA = True         # True is recommended
 
-IMG_DIR ='.../3xM_Dataset_10_10/rgb'            # Directory for RGB images
-DEPTH_DIR = '.../3xM_Dataset_10_10/depth'       # Directory for depth-preprocessed images
-MASK_DIR = '.../3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
-WIDTH = 1920                                    # Image width for processing
-HEIGHT = 1080                                   # Image height for processing
+    GROUND_PATH = "/mnt/morespace/3xM"     
+    DATASET_NAME = "3xM_Dataset_160_160"
+    IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
+    DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
+    MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
 
-DATA_MODE = DATA_LOADING_MODE.ALL               # Mode for loading data -> All, Random, Range, Single Image
-AMOUNT = 100                                    # Number of images for random mode
-START_IDX = 0                                   # Starting index for range mode
-END_IDX = 99                                    # Ending index for range mode
-IMAGE_NAME = "3xM_0_10_10.png"                  # Specific image name for single mode
+    DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
+    AMOUNT = 100                       # Number of images for random mode
+    START_IDX = 0                      # Starting index for range mode
+    END_IDX = 99                       # Ending index for range mode
+    IMAGE_NAME = "3xM_0_10_10.png"     # Specific image name for single mode
 
-NUM_WORKERS = 4                                 # Number of workers for data loading
+    NUM_WORKERS = 4                    # Number of workers for data loading
 
-MULTIPLE_DATASETS = None                        # Path to folder for training multiple models
-NAME = 'mask_rcnn_TEST'                         # Name of the model to use
+    MULTIPLE_DATASETS = None                                        # Path to folder for training multiple models
+    SKIP_DATASETS = ["3xM_Test_Datasets", "3xM_Dataset_10_160"]     # Datasets to skip, if training multiple datasets
+    NAME = 'extended_mask_rcnn_rgbd'                                # Name of the model to use
 
-USING_EXPERIMENT_TRACKING = True                # Enable experiment tracking
-CREATE_NEW_EXPERIMENT = False                   # Whether to create a new experiment run
-EXPERIMENT_NAME = "3xM Instance Segmentation"   # Name of the experiment
+    USING_EXPERIMENT_TRACKING = False              # Enable experiment tracking
+    CREATE_NEW_EXPERIMENT = True                   # Whether to create a new experiment run
+    EXPERIMENT_NAME = "3xM Instance Segmentation"  # Name of the experiment
 
-NUM_EPOCHS = 20                                 # Number of training epochs
-LEARNING_RATE = 0.001                           # Learning rate for the optimizer
-MOMENTUM = 0.9                                  # Momentum for the optimizer
-DECAY = 0.0005                                  # Weight decay for regularization
-BATCH_SIZE = 8                                  # Batch size for training
-SHUFFLE = True                                  # Shuffle the data during training
-
-# Decide which Data Augmentation should be applied
-APPLY_RANDOM_FLIP = True
-APPLY_RANDOM_ROTATION = True
-APPLY_RANDOM_CROP = True
-APPLY_RANDOM_BRIGHTNESS_CONTRAST = True
-APPLY_RANDOM_GAUSSIAN_NOISE = True
-APPLY_RANDOM_GAUSSIAN_BLUR = True
-APPLY_RANDOM_SCALE = True
+    NUM_EPOCHS = 100                   # Number of training epochs
+    LEARNING_RATE = 3e-3               # Learning rate for the optimizer
+    MOMENTUM = 0.9                     # Momentum for the optimizer
+    BATCH_SIZE = 1                     # Batch size for training
+    SHUFFLE = True                     # Shuffle the data during training
+    
+    # Decide which Data Augmentation should be applied
+    APPLY_RANDOM_FLIP = True
+    APPLY_RANDOM_ROTATION = True
+    APPLY_RANDOM_CROP = True
+    APPLY_RANDOM_BRIGHTNESS_CONTRAST = True
+    APPLY_RANDOM_GAUSSIAN_NOISE = True
+    APPLY_RANDOM_GAUSSIAN_BLUR = True
+    APPLY_RANDOM_SCALE = True
+    APPLY_RANDOM_BACKGROUND_MODIFICATION = True
 ```
 
-
-You also can run a hyperparameter optimization.
-For that you have to set MODE to RUN_MODE.HYPERPARAMETER_OPTIMIZATION and go to the
-
-```plaintext
-# --------------------- #
-# HYPERPARAMETER TUNING #
-# --------------------- #
-```
-
-section.
-
-There are following parameters:
-
-```python
-USE_DEPTH = False                               # Whether to include depth information -> as rgb and depth on green channel
-
-IMG_DIR ='.../3xM_Dataset_10_10/rgb'            # Directory for RGB images
-DEPTH_DIR = '.../3xM_Dataset_10_10/depth-prep'  # Directory for depth-preprocessed images
-MASK_DIR = '.../3xM_Dataset_10_10/mask'         # Directory for mask-preprocessed images
-WIDTH = 800                                     # Image width for processing
-HEIGHT = 450                                    # Image height for processing
-
-DATA_MODE = DATA_LOADING_MODE.RANGE             # Mode for loading data -> All, Random, Range, Single Image
-AMOUNT = 100                                    # Number of images for random mode
-START_IDX = 0                                   # Starting index for range mode
-END_IDX = 199                                   # Ending index for range mode
-IMAGE_NAME = "3xM_0_10_10.png"                  # Specific image name for single mode
-
-NUM_WORKERS = 4                                 # Number of workers for data loading
-
-# Decide which Data Augmentation should be applied
-APPLY_RANDOM_FLIP = True
-APPLY_RANDOM_ROTATION = True
-APPLY_RANDOM_CROP = True
-APPLY_RANDOM_BRIGHTNESS_CONTRAST = True
-APPLY_RANDOM_GAUSSIAN_NOISE = True
-APPLY_RANDOM_GAUSSIAN_BLUR = True
-APPLY_RANDOM_SCALE = True
-```
 
 
 ---
@@ -180,32 +157,40 @@ section.
 Now you can adjust the setting after your needs:
 
 ```python
-WEIGHTS_PATH = "./weights/mask_rcnn.pth"        # Path to the model weights file
-USE_DEPTH = False                               # Whether to include depth information -> as rgb and depth on green channel
+EXTENDED_VERSION = False      # Decides if a Mask RCNN with more FPN Layers and a less strict NMS and another Learning Rate strategy should get used
+WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_80_160_epoch_040.pth"  # Path to the model weights file
+MASK_SCORE_THRESHOLD = 0.5    # score to accept a result mask
+USE_DEPTH = False             # Whether to include depth information -> as rgb and depth on green channel
+VERIFY_DATA = True            # True is recommended
 
-IMG_DIR ='.../3xM_Dataset_10_10/rgb-prep'       # Directory for RGB images
-DEPTH_DIR = '.../3xM_Dataset_10_10/depth-prep'  # Directory for depth-preprocessed images
-MASK_DIR = '.../3xM_Dataset_10_10/mask-prep'    # Directory for mask-preprocessed images
-WIDTH = 800                                     # Image width for processing
-HEIGHT = 450                                    # Image height for processing
+GROUND_PATH = "D:/3xM/3xM_Test_Dataset/"
+DATASET_NAME = "OCID-dataset-prep"
+IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
+DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
+MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
 
-DATA_MODE = DATA_LOADING_MODE.SINGLE            # Mode for loading data -> All, Random, Range, Single Image
-AMOUNT = 10                                     # Number of images for random mode
-START_IDX = 0                                   # Starting index for range mode
-END_IDX = 9                                     # Ending index for range mode
-IMAGE_NAME = "3xM_0_10_10.png"                  # Specific image name for single mode
+DATA_MODE = DATA_LOADING_MODE.ALL  # Mode for loading data -> All, Random, Range, Single Image
+AMOUNT = 10                        # Number of images for random mode
+START_IDX = 0                      # Starting index for range mode
+END_IDX = 10                       # Ending index for range mode
+IMAGE_NAME = "3xM_10000_10_80.png" # Specific image name for single mode
 
-NUM_WORKERS = 4                                 # Number of workers for data loading
+NUM_WORKERS = 4                    # Number of workers for data loading
 
-OUTPUT_DIR = "./output"                         # Directory to save output files
-USE_MASK = True                                 # Whether to use masks during inference
-OUTPUT_TYPE = "png"                             # Output format: 'numpy-array' or 'png'
-SHOULD_VISUALIZE = True                         # Whether to visualize the results
-VISUALIZATION_DIR = "./output/visualizations"   # Directory to save visualizations
-SAVE_VISUALIZATION = True                       # Save the visualizations to disk
-SHOW_VISUALIZATION = False                      # Display the visualizations
-SAVE_EVALUATION = True                          # Save the evaluation results
-SHOW_EVALUATION = False                         # Display the evaluation results
+OUTPUT_DIR = "./output"            # Directory to save output files
+USE_MASK = True                    # Whether to use masks during inference
+SHOULD_SAVE_MASK = False           # Decides whether to save the result mask
+OUTPUT_TYPE = "png"                # Output format: 'numpy-array' or 'png'
+SHOULD_VISUALIZE_MASK = False,     # if the predicted mask should get visualized
+SHOULD_VISUALIZE_MASK_AND_IMAGE = False,    # if the mask on top of the image get visualized
+SAVE_VISUALIZATION = False          # Save the visualizations to disk
+SHOW_VISUALIZATION = False          # Display the visualizations
+SAVE_EVALUATION = True              # Save the evaluation results
+SHOW_EVALUATION = False             # Display the evaluation results
+SHOW_INSIGHTS = False               # If the insight pictures should get showed, from the in-between network steps
+SAVE_INSIGHTS = False               # If the insight pictures should get saved, from the in-between network steps
+
+RESET_OUTPUT = True                 # Should output folder be deleted/cleared before inferencing 
 ```
 
 
