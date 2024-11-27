@@ -133,7 +133,7 @@ if MODE == RUN_MODE.TRAIN:
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
     EXTENDED_VERSION = False
-    WEIGHTS_PATH = "./weights/mask_rcnn_rgbd_3xM_Dataset_10_160_epoch_040.pth"  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_rgbd_3xM_Dataset_80_80_epoch_040.pth"  # Path to the model weights file
     MASK_SCORE_THRESHOLD = 0.5
     USE_DEPTH = True                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = True         # True is recommended
@@ -156,8 +156,8 @@ if MODE == RUN_MODE.INFERENCE:
     USE_MASK = True                    # Whether to use masks during inference
     SHOULD_SAVE_MASK = False
     OUTPUT_TYPE = "png"                # Output format: 'numpy-array' or 'png'
-    SHOULD_VISUALIZE_MASK = False,
-    SHOULD_VISUALIZE_MASK_AND_IMAGE = False,
+    SHOULD_VISUALIZE_MASK = False
+    SHOULD_VISUALIZE_MASK_AND_IMAGE = False
     SAVE_VISUALIZATION = False          # Save the visualizations to disk
     SHOW_VISUALIZATION = False          # Display the visualizations
     SAVE_EVALUATION = True             # Save the evaluation results
@@ -165,7 +165,7 @@ if MODE == RUN_MODE.INFERENCE:
     SHOW_INSIGHTS = False
     SAVE_INSIGHTS = False
 
-    RESET_OUTPUT = False
+    RESET_OUTPUT = True
 
 
 

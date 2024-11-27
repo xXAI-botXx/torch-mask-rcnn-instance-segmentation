@@ -9,6 +9,9 @@ Using Mask-RCNN from Pytorch for instance segmentation with ease.
 - [See Training Results](#see-training-results)
 
 
+-> This project works (for example) perfectly with the [3xM Datasets](https://github.com/xXAI-botXx/3xM)
+
+
 
 ---
 ### Installation
