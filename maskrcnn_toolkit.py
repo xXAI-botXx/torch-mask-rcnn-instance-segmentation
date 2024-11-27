@@ -133,9 +133,9 @@ if MODE == RUN_MODE.TRAIN:
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
     EXTENDED_VERSION = False
-    WEIGHTS_PATH = "./weights/mask_rcnn_rgb_3xM_Dataset_160_160_epoch_040.pth"  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_rgbd_3xM_Dataset_10_160_epoch_040.pth"  # Path to the model weights file
     MASK_SCORE_THRESHOLD = 0.5
-    USE_DEPTH = False                   # Whether to include depth information -> as rgb and depth on green channel
+    USE_DEPTH = True                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = True         # True is recommended
 
     GROUND_PATH = "D:/3xM/3xM_Test_Dataset/"   # "/mnt/morespace/3xM"    "D:/3xM/3xM_Test_Dataset/3xM_Bias_Experiment"
@@ -165,7 +165,7 @@ if MODE == RUN_MODE.INFERENCE:
     SHOW_INSIGHTS = False
     SAVE_INSIGHTS = False
 
-    RESET_OUTPUT = True
+    RESET_OUTPUT = False
 
 
 
@@ -271,20 +271,20 @@ class Extended_FPN(nn.Module):
 
         # Inner Blocks: 1x1 Convolutions for Channel-Resizing / Adjustment
         self.inner_blocks = nn.ModuleList([
-            nn.Conv2d(64, 256, kernel_size=1),   # Für C1 (64 Channels)
-            nn.Conv2d(256, 256, kernel_size=1),  # Für C2
-            nn.Conv2d(512, 256, kernel_size=1),  # Für C3
-            nn.Conv2d(1024, 256, kernel_size=1), # Für C4
-            nn.Conv2d(2048, 256, kernel_size=1)  # Für C5
+            nn.Conv2d(64, 256, kernel_size=1),   # for C1 (64 Channels)
+            nn.Conv2d(256, 256, kernel_size=1),  # for C2
+            nn.Conv2d(512, 256, kernel_size=1),  # for C3
+            nn.Conv2d(1024, 256, kernel_size=1), # for C4
+            nn.Conv2d(2048, 256, kernel_size=1)  # for C5
         ])
 
         # Layer Blocks: 3x3 Convolutions for more refined results
         self.layer_blocks = nn.ModuleList([
-            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),  # Für P1
-            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),  # Für P2
-            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),  # Für P3
-            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),  # Für P4
-            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)   # Für P5
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),  # for P1
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),  # for P2
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),  # for P3
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),  # for P4
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)   # for P5
         ])
 
     def forward(self, c1, c2, c3, c4, c5):
@@ -318,8 +318,7 @@ class Extended_Backbone(nn.Module):
         
     def forward(self, x):
         c1, c2, c3, c4, c5 = self.body(x)  # Deine ResNet-Features
-        fpn_features = self.fpn(c1, c2, c3, c4, c5)  # Deine FPN-Features
-        # Mask R-CNN erwartet ein Dictionary mit Feature-Maps
+        fpn_features = self.fpn(c1, c2, c3, c4, c5)
         return {"p1": fpn_features[0], "p2": fpn_features[1], "p3": fpn_features[2], "p4": fpn_features[3], "p5": fpn_features[4]}
 
 
@@ -370,12 +369,12 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
             # Create new conv layer with 4 channels
             new_conv1 = torch.nn.Conv2d(4, out_features, kernel_size=kernel_size, stride=stride, padding=padding)
             
-            # copy the existing weights from the first 3 Channels
+            # Copy the existing weights from the first 3 Channels
             with torch.no_grad():
                 new_conv1.weight[:, :3, :, :] = model.backbone.body.conv1.weight  # Copy old 3 Channels
                 new_conv1.weight[:, 3:, :, :] = model.backbone.body.conv1.weight[:, :1, :, :]  # Init new 4.th Channel with the one old channel
 
-            # update model
+            # Update model
             model.backbone.body.update_conv1(new_conv1)
             
             # Modify the transform to handle 4 channels
@@ -386,17 +385,13 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
         
         # update RPN
         # modify anchors for smaller objects
-        # model.rpn.anchor_generator = AnchorGenerator(
-        #     sizes = ((16, 32, 64, 128, 256),),
-        #     aspect_ratios = ((0.25, 0.5, 1.0, 2.0, 3.0),)
-        # )
         rpn_anchor_generator = AnchorGenerator(
             sizes=(
                 (16, 32, 64),        # Sizes for level 0
                 (32, 64, 128),       # Sizes for level 1
-                (64, 128, 256),     # Sizes for level 2
-                (128, 256, 512),   # Sizes for level 3
-                (256, 512, 1024),  # Sizes for level 4
+                (64, 128, 256),      # Sizes for level 2
+                (128, 256, 512),     # Sizes for level 3
+                (256, 512, 1024),    # Sizes for level 4
             ),
             aspect_ratios=(
                 (0.25, 0.5, 1.0),  # Aspect ratios for level 0
@@ -407,9 +402,6 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
             ),
         )
         
-        # anchor_sizes = ((32,), (64,), (128,), (256,), (512,))
-        # aspect_ratios = ((0.125, 0.25, 0.5, 1.0, 2.0),) * len(anchor_sizes)
-        # rpn_anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
         rpn_head = RPNHead(out_channels, rpn_anchor_generator.num_anchors_per_location()[0])
         rpn_fg_iou_thresh = 0.7
         rpn_bg_iou_thresh = 0.3
@@ -536,11 +528,17 @@ def load_maskrcnn(weights_path=None, use_4_channels=False, pretrained=True,
         
     # load weights
     if weights_path:
-        if torch.cuda.is_available():
-            model.load_state_dict(state_dict=torch.load(weights_path, weights_only=True)) 
-        else:
-            model.load_state_dict(state_dict=torch.load(weights_path, weights_only=True, map_location=torch.device('cpu'))) 
-    
+        try:
+            if torch.cuda.is_available():
+                model.load_state_dict(state_dict=torch.load(weights_path, weights_only=True)) 
+            else:
+                model.load_state_dict(state_dict=torch.load(weights_path, weights_only=True, map_location=torch.device('cpu'))) 
+        except RuntimeError:
+            if use_4_channels:
+                raise RuntimeError("It seems like you try to load a model without depth. Try to set 'USE_DEPTH' to false.")
+            else:
+                raise RuntimeError("It seems like you try to load a model with depth. Try to set 'USE_DEPTH' to true.")
+
     model_str = "Parameter of Mask R-CNN:"
     model_parts = dict()
     for name, param in model.named_parameters():
@@ -947,6 +945,24 @@ class Dual_Dir_Dataset(Dataset):
         # set new updated image ID's
         self.img_names = updated_images
         log(self.log_path, f"{'-'*32}\n", should_log=self.should_log, should_print=self.should_print)
+
+        # verify minimum foundings
+        if len(self.img_names) <= 0:
+            error_message = f"DataLoader found not enough files! \n    -> {images_found} RGB images found in '{self.img_dir}'"
+
+            if self.use_mask:
+                error_message += f"\n    -> {masks_found} mask images found in '{self.mask_dir}'"
+                if masks_found <= 0 and images_found > 0:
+                    error_message += "\n        => are you sure you want USE_MASK to be True?"
+
+            if self.use_depth:
+                error_message += f"\n    -> {depth_found} depth images found in '{self.depth_dir}'"
+                if depth_found <= 0 and images_found > 0:
+                    error_message += "\n        => are you sure you want USE_DEPTH to be True?"
+
+
+            raise FileNotFoundError(error_message)
+
 
         # detect background
         most_used_bg_value = 1
@@ -3069,11 +3085,11 @@ def inference(
 
     os.makedirs(output_dir, exist_ok=True)
     eval_sum_dict = dict()
+    eval_dir = os.path.join(output_dir, "evaluations")
     if use_mask and save_evaluation:
-        eval_dir = os.path.join(output_dir, "evaluations")
         os.makedirs(eval_dir, exist_ok=True)
+    visualization_dir = os.path.join(output_dir, "visualizations")
     if save_visualization and (should_visualize_mask or should_visualize_mask_and_image):
-        visualization_dir = os.path.join(output_dir, "visualizations")
         os.makedirs(visualization_dir, exist_ok=True)
     
     height, width = dataset.size()
