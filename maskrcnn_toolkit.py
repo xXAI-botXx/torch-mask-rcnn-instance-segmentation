@@ -133,13 +133,13 @@ if MODE == RUN_MODE.TRAIN:
 # --------- #
 if MODE == RUN_MODE.INFERENCE:
     EXTENDED_VERSION = False
-    WEIGHTS_PATH = "./weights/mask_rcnn_rgbd_3xM_Dataset_80_80_epoch_040.pth"  # Path to the model weights file
+    WEIGHTS_PATH = "./weights/mask_rcnn_rgbd_3xM_Dataset_160_160_epoch_040.pth"  # Path to the model weights file
     MASK_SCORE_THRESHOLD = 0.5
     USE_DEPTH = True                   # Whether to include depth information -> as rgb and depth on green channel
     VERIFY_DATA = True         # True is recommended
 
     GROUND_PATH = "D:/3xM/3xM_Test_Dataset/"   # "/mnt/morespace/3xM"    "D:/3xM/3xM_Test_Dataset/3xM_Bias_Experiment"
-    DATASET_NAME = "OCID-dataset-prep"    #  "3xM_Bias_Experiment", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
+    DATASET_NAME = "3xM_Bias_Experiment"    #  "3xM_Bias_Experiment", "3xM_Test_Dataset_known_known", "OCID-dataset-prep"
     IMG_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'rgb')        # Directory for RGB images
     DEPTH_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'depth')    # Directory for depth-preprocessed images
     MASK_DIR = os.path.join(GROUND_PATH, DATASET_NAME, 'mask')      # Directory for mask-preprocessed images
@@ -153,14 +153,14 @@ if MODE == RUN_MODE.INFERENCE:
     NUM_WORKERS = 4                    # Number of workers for data loading
 
     OUTPUT_DIR = "./output"            # Directory to save output files
-    USE_MASK = True                    # Whether to use masks during inference
+    USE_MASK = False                    # Whether to use masks during inference
     SHOULD_SAVE_MASK = False
     OUTPUT_TYPE = "png"                # Output format: 'numpy-array' or 'png'
-    SHOULD_VISUALIZE_MASK = False
-    SHOULD_VISUALIZE_MASK_AND_IMAGE = False
-    SAVE_VISUALIZATION = False          # Save the visualizations to disk
+    SHOULD_VISUALIZE_MASK = True
+    SHOULD_VISUALIZE_MASK_AND_IMAGE = True
+    SAVE_VISUALIZATION = True          # Save the visualizations to disk
     SHOW_VISUALIZATION = False          # Display the visualizations
-    SAVE_EVALUATION = True             # Save the evaluation results
+    SAVE_EVALUATION = False             # Save the evaluation results
     SHOW_EVALUATION = False             # Display the evaluation results
     SHOW_INSIGHTS = False
     SAVE_INSIGHTS = False
